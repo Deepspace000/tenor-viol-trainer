@@ -290,7 +290,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='2.0';
+const APP_VERSION='2.1';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -392,9 +392,18 @@ const staffClef=()=>VIOLS[st.sv]&&VIOLS[st.sv].clef||st.clef;
 let ac,audioWoken=false,silentEl=null;
 const IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 function setSession(type){try{if(navigator.audioSession&&navigator.audioSession.type!==type)navigator.audioSession.type=type;}catch(e){}}
+// After another page, tab or app an iPad can leave the sound engine asleep ("suspended" or "interrupted") or close it.
+// A tap wakes it; if it is closed, or still asleep a while after it was asked to wake, a new one is made (in the tap).
+let wakeAsked=0;
 function audioCtx(){
-  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
-  if(ac.state!=='running'&&ac.state!=='closed')ac.resume().catch(()=>{});
+  if(ac&&(ac.state==='closed'||ac.state!=='running'&&wakeAsked&&performance.now()-wakeAsked>1500)){
+    if(playing)stopPlay();   // (the music was on the old one)
+    try{if(ac.state!=='closed')ac.close();}catch(e){}
+    ac=null;master=wet=dry=null;wakeAsked=0;   // (the next sound builds its room and limiter again)
+  }
+  if(!ac){ac=new (window.AudioContext||window.webkitAudioContext)();audioWoken=false;}
+  if(ac.state!=='running'){if(!wakeAsked)wakeAsked=performance.now();const c=ac;c.resume().then(()=>{if(c===ac)wakeAsked=0;}).catch(()=>{});}
+  else wakeAsked=0;
   return ac;
 }
 function silentWavUrl(){   // half a second of silence, 8-bit mono
@@ -417,7 +426,6 @@ function wakeAudio(){
   }
 }
 ['pointerdown','pointerup','touchend','click','keydown'].forEach(ev=>addEventListener(ev,wakeAudio,{capture:true,passive:true}));
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&silentEl)silentEl.pause();});
 /* ---------- string sounds ----------
    A bowed string is close to a sawtooth wave. Here it is shaped by the instrument's body (two resonances), a gentle
    bow attack and a vibrato that comes in after the note starts. Every part has its own volume and place from left to
@@ -1906,10 +1914,12 @@ $('recBtn').onclick=()=>{rec.on?stopRec():startRec();};
 $('impBtn').onclick=()=>$('impFile').click();
 $('impFile').onchange=()=>{const f=$('impFile').files[0];if(f)loadFile(f);$('impFile').value='';};
 $('pdfClose').onclick=()=>{$('pdfref').classList.remove('open');};
+// the whole score, as saved in a .json file (and kept on this device)
+const scoreData=()=>({app:'tenor-viol-trainer',version:3,title:$('title').value,key:st.key,clef:st.clef,bpm:sc.bpm,ts:sc.ts,reverb:sc.reverb,part:sc.pi,neckPart:sc.neckPart,
+  parts:sc.parts.map(p=>({name:p.name,clef:p.clef,mainClef:p.mainClef||null,sound:p.sound,viol:violOf(p),vol:p.vol,pan:p.pan,mute:p.mute,solo:p.solo,items:p.items}))});
 $('expBtn').onclick=()=>{
   if(rec.on)stopRec();
-  const data={app:'tenor-viol-trainer',version:3,title:$('title').value,key:st.key,clef:st.clef,bpm:sc.bpm,ts:sc.ts,reverb:sc.reverb,part:sc.pi,neckPart:sc.neckPart,
-    parts:sc.parts.map(p=>({name:p.name,clef:p.clef,mainClef:p.mainClef||null,sound:p.sound,viol:violOf(p),vol:p.vol,pan:p.pan,mute:p.mute,solo:p.solo,items:p.items}))};
+  const data=scoreData();
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,1)],{type:'application/json'}));
   a.download=($('title').value||'tenor-viol-score').replace(/[^\w\- ]+/g,'')+'.json';
@@ -1928,6 +1938,27 @@ addEventListener('keydown',e=>{
 });
 buildPalette();buildAnswerUI();setMode();buildParts();drawRecording();
 stat('Pick a rhythm, then click notes on the neck. Click a note in the score to select and edit it.');
+// The score is kept on this device: every little while, and whenever you leave the page. An iPad often reloads a page
+// you come back to, so the score you had comes back with it.
+let savedJson='';
+function saveScore(){try{const j=JSON.stringify(scoreData());if(j!==savedJson){localStorage.setItem('tenor-viol-score',j);savedJson=j;}}catch(e){}}
+setInterval(saveScore,15000);
+(()=>{let j=null,d=null;try{j=localStorage.getItem('tenor-viol-score');d=j&&JSON.parse(j);}catch(e){}
+  if(!d||!Array.isArray(d.parts)||!d.parts.some(p=>p.items&&p.items.length))return;
+  savedJson=j;
+  loadFile(new File([j],'saved.json',{type:'application/json'})).then(()=>{if(sc.parts.some(p=>p.items.length))stat('Your score is back as you left it.');});
+})();
+// Leaving the page (another tab, app or website): the score is kept, and on an iPad (which stops a hidden page's sound)
+// the music and the microphone stop. Coming back: the first tap wakes the sound; the page is drawn for its size again.
+function leavePage(stopAll){
+  saveScore();
+  if(stopAll){if(rec.on)stopRec();stopPlay();}
+  if(silentEl)silentEl.pause();
+  audioWoken=false;
+}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)leavePage(IOS);});   // (a computer may play on in a hidden tab)
+addEventListener('pagehide',()=>leavePage(true));
+addEventListener('pageshow',e=>{if(!e.persisted)return;audioWoken=false;drawNecks();keepScroll(drawRecording);fitFold();followUI();});
 </script>
 </body>
 </html>
