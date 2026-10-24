@@ -24,6 +24,9 @@ button.on,button.fold.open{background:var(--gold);color:#1a1410;border-color:var
 .foldp .controls+.controls{margin-top:8px}
 #neckWrap{flex:none;display:grid;gap:2px 8px;background:var(--panel);border:1px solid #3d2f22;border-radius:10px;padding:2px 6px}
 #neckWrap .neck{min-width:0}
+/* the label above each neck: its name in the viol's colour, and its tuning */
+#neckWrap .nlab{height:20px;line-height:20px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px}
+#neckWrap .nlab .tun{color:var(--dim);font-size:12px;margin-left:6px}
 #neckWrap svg{width:100%;height:auto;max-height:27vh;display:block}
 .dot{cursor:pointer}
 .dot circle{transition:fill .1s}
@@ -56,6 +59,7 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
 @keyframes pulse{50%{opacity:.55}}
 #recscore{padding:6px;min-height:80px;color:#1a1410}
 #recscore .ph{color:#7a6a4e;padding:24px;text-align:center}
+#recscore .playmark{mix-blend-mode:multiply;opacity:.85}   /* the highlighter behind the note that is playing */
 #rectitle{display:none}
 #partsBar{display:flex;flex-direction:column;gap:4px}
 .prow{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:4px 8px;border:1px solid #3d2f22;border-radius:8px}
@@ -79,6 +83,7 @@ span.pname{min-width:0;color:var(--dim)}
   #scoreBox{overflow:visible;background:#fff;border-radius:0}
   #rectitle{display:block;margin:0 0 8px;font-size:22px;color:#000}
   #recscore{padding:0}
+  .playmark{display:none}
 }
 </style>
 </head>
@@ -223,7 +228,7 @@ span.pname{min-width:0;color:var(--dim)}
   </table>
   <p>Tuned <b>G C F A D G</b> (low to high): fourths with a major third between strings 3 and 4 (F–A). It sits a fourth above the bass viol (D G C E A D). The tenor is non-transposing. Typically 7 gut frets, tied on and movable; they are a semitone apart, so the names here are the equal-tempered ones (real viols often use meantone).</p>
   <p><b>Clefs:</b> the tenor viol usually reads <b>alto clef</b> (C clef on the middle line, which is middle C). Some editions use tenor clef (C on the 4th line) or octave treble, and high parts can be in treble at pitch. Landmarks: middle line = C4; top line = G4 (open 1st string); bottom line = F3 (open 4th string).</p>
-  <p><b>Treble and bass viols:</b> the treble viol is tuned D3 G3 C4 E4 A4 D5 and reads treble clef. The bass viol is tuned D2 G2 C3 E3 A3 D4 and reads bass clef, with alto clef for high passages. Their necks can be shown under Settings. When a score plays, the part chosen under Neck shows (in the toolbar) lights up on the neck of its viol; choose Every part to get a neck for each part.</p>
+  <p><b>Treble and bass viols:</b> the treble viol is tuned D3 G3 C4 E4 A4 D5 and reads treble clef. The bass viol is tuned D2 G2 C3 E3 A3 D4 and reads bass clef, with alto clef for high passages. Their necks can be shown under Settings. When a score plays, the part chosen under Neck shows (in the toolbar) lights up on the neck of its viol; choose Every part to get a neck for each part. Each viol has its colour wherever its parts appear: treble yellow, tenor gold, bass purple.</p>
   <p><small>Sources: <a href="https://vdgsa.org/_files/ugd/d4b545_fba5a064eaad4df0b0ec9005c26cd76c.pdf">VdGSA viol help sheet</a>, <a href="https://saraband.com.au/altoclef.htm">Saraband: Viola &amp; Tenor Viol</a>, <a href="https://www.youngcomposersaward.co.uk/writing-for-viol-and-voices">Writing for viol and voices</a>.</small></p>
 </div>
 
@@ -251,7 +256,7 @@ span.pname{min-width:0;color:var(--dim)}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='1.8';
+const APP_VERSION='1.9';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -268,6 +273,14 @@ const VIOLS={
   tenor:{name:'Tenor viol',open:[67,62,57,53,48,43],clef:null,sound:'viola'},          // G2 C3 F3 A3 D4 G4 (clef: the Clef box)
   bass:{name:'Bass viol',open:[62,57,52,48,43,38],clef:'bass',sound:'cello'}};        // D2 G2 C3 E3 A3 D4
 const VIOL_ORDER=['treble','tenor','bass'];
+// Each viol has its own colour, used for its parts everywhere: on the necks (the name, the string names and the notes
+// that light up), for the note that is playing in the score (a highlighter mark behind it) and for the parts' names.
+// Treble (soprano) yellow, tenor gold, bass purple. neck: on the necks; title: names on the dark panels; ink: writing on
+// the neck colour; paper: notes and names on the score; mark: the highlighter.
+const VCOL={
+  treble:{neck:'#ffd83a',title:'#ffd83a',ink:'#1a1410',paper:'#7d6600',mark:'#fff06a'},
+  tenor:{neck:'#e3a01b',title:'#e8a317',ink:'#1a1410',paper:'#8a5200',mark:'#f0b13a'},
+  bass:{neck:'#8a4fd8',title:'#b48cf0',ink:'#ffffff',paper:'#5a2a9a',mark:'#c9a6f5'}};
 const OPEN=VIOLS.tenor.open;
 const SHARP=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const FLAT =['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
@@ -322,8 +335,11 @@ const allowed=m=>st.acc!=='diatonic'||spell(m).inKey;
 // each part of the score (named after it, tuned like its viol). A neck is known by an id: the viol ('tenor'), or 'p'
 // and the part's number ('p2').
 const partNecks=()=>sc.parts.length>1&&sc.neckPart<0;
-function neckSlots(){return partNecks()?sc.parts.map((p,i)=>({id:'p'+i,v:violOf(p),name:p.name.replace(/ viol\b/i,''),pi:i})):st.necks.map(v=>({id:v,v,name:VIOLS[v].name}));}
+function neckSlots(){return partNecks()?sc.parts.map((p,i)=>({id:'p'+i,v:violOf(p),name:p.name,pi:i})):st.necks.map(v=>({id:v,v,name:VIOLS[v].name}));}
 const violAt=id=>VIOLS[id]?id:violOf(sc.parts[+id.slice(1)]);   // the viol a neck is tuned like
+const colOfNeck=id=>VCOL[violAt(id)],colOfPart=pi=>VCOL[violOf(sc.parts[pi])];
+// dark writing on a light colour, white on a dark one
+const inkOn=c=>{const n=parseInt(c.slice(1),16);return ((n>>16)*299+((n>>8)&255)*587+(n&255)*114)/1000<140?'#ffffff':'#1a1410';};
 const neckName=id=>{const sl=neckSlots().find(s=>s.id===id);return sl?sl.name:VIOLS[violAt(id)].name;};
 const hk=(v,s,f)=>v+':'+s+'_'+f;   // a place on a neck: neck, string, fret
 function positions(v=quizNeck()){const p=[];VIOLS[violAt(v)].open.forEach((o,s)=>{for(let f=0;f<=st.frets;f++)p.push({v,s,f,m:o+f,k:hk(v,s,f)});});return p;}
@@ -424,21 +440,26 @@ const strName=m=>SHARP[pc(m)]+(Math.floor(m/12)-1);
 const neckDrawn={};
 function drawNecks(){
   const wrap=$('neckWrap'),slots=neckSlots(),n=slots.length,ids=slots.map(s=>s.id).join();
-  if(wrap.dataset.v!==ids){wrap.innerHTML=slots.map(s=>`<div class="neck" data-v="${s.id}"></div>`).join('');wrap.dataset.v=ids;for(const k in neckDrawn)delete neckDrawn[k];}
+  if(wrap.dataset.v!==ids){wrap.innerHTML=slots.map(s=>`<div class="neck" data-v="${s.id}"><div class="nlab"></div><div class="nsvg"></div></div>`).join('');wrap.dataset.v=ids;for(const k in neckDrawn)delete neckDrawn[k];}
   const w=(wrap.clientWidth||1000)-12,compact=n>1,H=compact?252:290,F=st.frets;
   const minW=Math.max(420,110+(fretX(F)+60-fretX(0))*34/(fretX(F)-fretX(F-1)));   // the dots of the top frets must not touch
   // All the necks together are as tall as you dragged the bar to (at first about a quarter of the window). Side by
   // side or one above the other: whichever makes them biggest in that room.
   let best=null;
   for(let cols=n;cols>=1;cols--){
-    const rows=Math.ceil(n/cols),total=(st.neckFrac||[0.27,0.38,0.42,0.46,0.5][Math.min(rows,5)-1])*innerHeight,per=Math.max(40,(total-6-2*(rows-1))/rows);
+    const rows=Math.ceil(n/cols),total=(st.neckFrac||[0.27,0.38,0.42,0.46,0.5][Math.min(rows,5)-1])*innerHeight,per=Math.max(40,(total-6-2*(rows-1))/rows-20);   // (20: the label)
     const cell=(w-8*(cols-1))/cols,s=Math.min(per/H,cell/minW);
     if(!best||s>best.s*1.02)best={cols,per,cell,s};
   }
   const {cols,per,cell}=best;
   wrap.style.gridTemplateColumns=`repeat(${cols},minmax(0,1fr))`;
   const W=Math.round(Math.max(minW,Math.min(4000,H*cell/per)));
-  wrap.querySelectorAll('.neck').forEach(el=>{const v=el.dataset.v,s=neckSvg(v,W,H,compact,per);if(neckDrawn[v]!==s){el.innerHTML=s;neckDrawn[v]=s;}});
+  wrap.querySelectorAll('.neck').forEach(el=>{
+    const v=el.dataset.v,L=el.querySelector('.nlab'),s=neckSvg(v,W,H,compact,per);
+    const lab=`<b style="color:${colOfNeck(v).title}">● ${neckName(v)}</b><span class="tun">${VIOLS[violAt(v)].open.slice().reverse().map(m=>SHARP[pc(m)]).join(' ')}</span>`;
+    if(L.dataset.s!==lab){L.innerHTML=lab;L.dataset.s=lab;}
+    if(neckDrawn[v]!==s){el.querySelector('.nsvg').innerHTML=s;neckDrawn[v]=s;}
+  });
 }
 let necksT=0;
 const drawNecksSoon=()=>{if(!necksT)necksT=setTimeout(()=>{necksT=0;drawNecks();},0);};
@@ -449,11 +470,11 @@ function neckSvg(v,W,H,compact,per){
   s+=`<rect x="${nutX}" y="${y0}" width="${(xEnd-nutX).toFixed(1)}" height="${bh}" fill="#6b3f1f" rx="4"/>`;
   for(let n=1;n<=st.frets;n++)s+=`<rect x="${(fx(n)-2).toFixed(1)}" y="${y0}" width="4" height="${bh}" fill="#c9b27a"/>`;
   s+=`<rect x="${nutX-6}" y="${y0}" width="8" height="${bh}" fill="#efe6cf"/>`;
-  // the neck's name, and its strings
-  s+=`<text x="12" y="13" fill="#d9a441" font-size="14" font-weight="bold">${neckName(v)}</text>`;
+  // the strings, named in the viol's colour
+  const tc=colOfNeck(v).title;   // (the neck's name is in the label above it)
   VIOLS[violAt(v)].open.forEach((o,i)=>{const y=top+i*gap;
     s+=`<line x1="${nutX}" x2="${xEnd.toFixed(1)}" y1="${y}" y2="${y}" stroke="#e8dcc0" stroke-width="${1+i*.45}"/>`;
-    s+=`<text x="12" y="${y+5}" fill="#d9a441" font-size="15" style="cursor:pointer" data-str="${i}">${i+1} · ${strName(o)}</text>`;});
+    s+=`<text x="12" y="${y+5}" fill="${tc}" font-size="15" style="cursor:pointer" data-str="${i}">${i+1} · ${strName(o)}</text>`;});
   // a dot for every note; the ones that light up are drawn last, bigger and ringed, and while the music plays they
   // glow and the other dots step back
   const dim=!!playing,lit=[];
@@ -467,7 +488,7 @@ function neckSvg(v,W,H,compact,per){
   lit.forEach(({p,hl,lab,x,y})=>{
     s+=`<g class="dot lit" data-s="${p.s}" data-f="${p.f}" data-b="${st.pulse[p.k]||0}">`+(dim?`<circle cx="${x}" cy="${y}" r="28" fill="${hl}" opacity=".35"/>`:'')+
        `<circle class="main" cx="${x}" cy="${y}" r="19" fill="${hl}" stroke="#fff6dc" stroke-width="3"/>`+
-       `<text x="${x}" y="${y+5.5}" text-anchor="middle" font-size="${lab.length>1?14:17}" font-weight="bold" fill="#1a1410" font-family="Georgia">${lab}</text></g>`;
+       `<text x="${x}" y="${y+5.5}" text-anchor="middle" font-size="${lab.length>1?14:17}" font-weight="bold" fill="${inkOn(hl)}" font-family="Georgia">${lab}</text></g>`;
   });
   for(let n=0;n<=st.frets;n++)s+=`<text x="${X(n)}" y="${H-12}" text-anchor="middle" fill="#a8967c" font-size="13">${n===0?'open':n}</text>`;
   return s+'</svg>';
@@ -548,7 +569,7 @@ function onStaffNote(m){
   play(m,soundOf(st.sv));st.hl={};
   // where the note is on every neck shown
   const where=[],slots=neckSlots();
-  slots.forEach(sl=>{const ps=positions(sl.id).filter(p=>p.m===m);ps.forEach(p=>st.hl[p.k]='#d9a441');
+  slots.forEach(sl=>{const ps=positions(sl.id).filter(p=>p.m===m);ps.forEach(p=>st.hl[p.k]=colOfNeck(sl.id).neck);
     if(ps.length)where.push((slots.length>1?sl.name.replace(/ viol\b/i,'').toLowerCase()+': ':'')+ps.map(p=>`string ${p.s+1} ${p.f===0?'open':'fret '+p.f}`).join('  or  '));});
   drawNecks();
   msg(`${spell(m).name}: `+(where.join('  ·  ')||'out of fret range'));
@@ -565,7 +586,7 @@ function showString(v,s){
 function onNeck(v,s,f){
   const m=VIOLS[violAt(v)].open[s]+f;
   if(st.mode==='explore'){
-    st.sv=violAt(v);play(m,soundAt(v));st.hl={[hk(v,s,f)]:'#d9a441'};drawNecks();drawStaff([m]);msg(describe(v,s,f,m));
+    st.sv=violAt(v);play(m,soundAt(v));st.hl={[hk(v,s,f)]:colOfNeck(v).neck};drawNecks();drawStaff([m]);msg(describe(v,s,f,m));
     if(entryOn()){if(!VIOLS[v]&&+v.slice(1)!==sc.pi)usePart(+v.slice(1));addItem(m);}   // a part's own neck writes into that part
   }else if(st.mode==='s2n'){
     if(st.answered)return;
@@ -589,9 +610,9 @@ function newQ(){
   const p=pool[Math.floor(Math.random()*pool.length)];
   st.target=p.m;st.tpos=p;
   st.hideLabels=(st.mode!=='explore');
-  if(st.mode==='n2name'){st.hl={[p.k]:'#d9a441'};st.hideLabels=false;}
+  if(st.mode==='n2name'){st.hl={[p.k]:colOfNeck(p.v).neck};st.hideLabels=false;}
   // for n2name show gold dot with no label
-  if(st.mode==='n2name'){drawNeckBlankHL();drawStaff([]);msg('Which note is the gold dot? '+(st.acc==='diatonic'?'Tap the letter (key signature applies).':'Set ♭/♮/♯ first, then tap the letter.')+'');}
+  if(st.mode==='n2name'){drawNeckBlankHL();drawStaff([]);msg('Which note is the coloured dot? '+(st.acc==='diatonic'?'Tap the letter (key signature applies).':'Set ♭/♮/♯ first, then tap the letter.')+'');}
   else if(st.mode==='s2name'){drawNecks();drawStaff([p.m]);msg('Name this note.');}
   else{drawNecks();drawStaff([p.m]);msg('Find this note on the neck (any position counts).');}
   resetAnswer();score();
@@ -599,7 +620,7 @@ function newQ(){
 function drawNeckBlankHL(){ // gold dot without label
   const was=st.hl;st.hideLabels=true;st.hl={};drawNecks();
   const g=document.querySelector(`#neckWrap .neck[data-v="${st.tpos.v}"] .dot[data-s="${st.tpos.s}"][data-f="${st.tpos.f}"] circle`);
-  if(g){g.setAttribute('fill','#d9a441');neckDrawn[st.tpos.v]=null;}   // coloured by hand, so the next drawing replaces it
+  if(g){g.setAttribute('fill',colOfNeck(st.tpos.v).neck);neckDrawn[st.tpos.v]=null;}   // coloured by hand, so the next drawing replaces it
   st.hl=was;
 }
 let pickL=null,pickA='';
@@ -699,7 +720,7 @@ function buildParts(){
   const B=$('partsBar');B.innerHTML='';
   sc.parts.forEach((p,i)=>{
     const r=document.createElement('div');r.className='prow'+(i===sc.pi?' on':'');
-    r.innerHTML=`<button class="pname" title="Show this part">${i===sc.pi?'▶ ':''}${p.name}</button><span class="score">${CLEF_NAME[p.clef||st.clef]||''}, ${p.items.filter(x=>x.m!=null).length} notes</span>`+
+    r.innerHTML=`<button class="pname" title="Show this part"><span style="color:${colOfPart(i).neck}">●</span> ${i===sc.pi?'▶ ':''}${p.name}</button><span class="score">${CLEF_NAME[p.clef||st.clef]||''}, ${p.items.filter(x=>x.m!=null).length} notes</span>`+
       `<button class="ms mute${p.mute?' on':''}" title="Mute this part">M</button><button class="ms solo${p.solo?' on':''}" title="Play only the solo parts">S</button>`+
       `<label>Volume <input type="range" class="vol" min="0" max="1" step="0.01" value="${p.vol}"></label>`+
       `<label>Pan <input type="range" class="pan" min="-1" max="1" step="0.05" value="${p.pan}" title="Left to right"></label>`+
@@ -711,7 +732,7 @@ function buildParts(){
     r.querySelector('.vol').oninput=e=>{p.vol=+e.target.value;mixChanged();};
     r.querySelector('.pan').oninput=e=>{p.pan=+e.target.value;mixChanged();};
     r.querySelector('.snd').onchange=e=>{p.sound=e.target.value;};
-    r.querySelector('.vio').onchange=e=>{p.viol=e.target.value;st.hl={};playing?paintPlay():drawNecks();};
+    r.querySelector('.vio').onchange=e=>{p.viol=e.target.value;st.hl={};buildParts();markActivePart();if(playing)paintPlay();};   // (its colour changes too)
     B.append(r);
   });
   const rv=document.createElement('div');rv.className='prow';
@@ -807,7 +828,7 @@ function setDots(n){sc.dots=n;if(sc.sel>=0){snap();sc.items[sc.sel].d=durT();}bu
 function lightNeck(m){
   st.hl={};
   const v=partNecks()?'p'+sc.pi:sc.parts.length>1&&sc.neckPart!==sc.pi?null:neckFor(sc.pi);
-  if(v)positions(v).filter(p=>p.m===m).forEach(p=>st.hl[p.k]='#d9a441');
+  if(v)positions(v).filter(p=>p.m===m).forEach(p=>st.hl[p.k]=colOfNeck(v).neck);
   drawNecks();
 }
 function selectItem(i){
@@ -880,6 +901,20 @@ function splitBars(items){
 /* ---- drawing ---- */
 function viewItems(){return rec.on?sc.items.concat(notesToItems(micNotes())):sc.items;}
 let selEl=null,noteEls=new Map();
+// the note that is playing: in its part's colour, with a highlighter mark behind it
+function markNote(pi,i,on,map=elsOf(pi)){
+  if(!map||i==null)return;
+  (map.get(i)||[]).forEach(e=>{
+    const old=e.previousElementSibling;if(old&&old.classList.contains('playmark'))old.remove();
+    if(!on)return;
+    let b;try{b=e.getBBox();}catch(err){return;}
+    const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+    r.setAttribute('class','playmark');r.setAttribute('rx','5');r.setAttribute('fill',colOfPart(pi).mark);
+    r.setAttribute('x',(b.x-5).toFixed(1));r.setAttribute('y',(b.y-4).toFixed(1));r.setAttribute('width',(b.width+10).toFixed(1));r.setAttribute('height',(b.height+8).toFixed(1));
+    e.parentNode.insertBefore(r,e);
+  });
+  paintNote(i,on?colOfPart(pi).paper:pi===sc.pi&&i===sc.sel?'#1f5fbf':null,map);
+}
 function paintNote(i,col,map=noteEls){col=col||'#000';(map.get(i)||[]).forEach(e=>e.querySelectorAll('*').forEach(c=>{if(c.getAttribute('fill')!=='none')c.style.fill=col;if(c.getAttribute('stroke')&&c.getAttribute('stroke')!=='none')c.style.stroke=col;}));}
 const showNames=()=>$('namesChk').checked,showSolfa=()=>$('solfaChk').checked;
 // note name and sol-fa in two rows under the staff, centred on each notehead
@@ -996,7 +1031,7 @@ function drawScore(el){
     if(!noteEls.has(a.p.idx))noteEls.set(a.p.idx,[]);noteEls.get(a.p.idx).push(e);
     if(a.p.idx===sc.sel&&!selEl)selEl=e;
     e.style.cursor='pointer';e.addEventListener('click',()=>selectItem(a.p.idx));});
-  if(playing&&playing.lit[sc.pi]!=null)paintNote(playing.lit[sc.pi],'#e08a00');
+  if(playing)markNote(sc.pi,playing.lit[sc.pi],true);
 }
 
 /* ---- the full score: every part's staff, one above the other ----
@@ -1138,9 +1173,9 @@ function drawFullScore(el){
     const m=noteElsAll[pi];if(!m.has(a.p.idx))m.set(a.p.idx,[]);m.get(a.p.idx).push(e);
     if(pi===sc.pi&&a.p.idx===sc.sel&&!selEl)selEl=e;
     e.style.cursor='pointer';e.addEventListener('click',()=>{if(pi!==sc.pi)usePart(pi);selectItem(a.p.idx);});}));
-  if(playing)for(const k in playing.lit)paintNote(playing.lit[k],'#e08a00',noteElsAll[+k]);
+  if(playing)for(const k in playing.lit)markNote(+k,playing.lit[k],true,noteElsAll[+k]);
 }
-function markActivePart(){document.querySelectorAll('#recscore text.pnm').forEach(t=>{const on=+t.dataset.pi===sc.pi;t.setAttribute('fill',on?'#a0620a':'#4a3b28');t.setAttribute('font-weight',on?'bold':'normal');});}
+function markActivePart(){document.querySelectorAll('#recscore text.pnm').forEach(t=>{const on=+t.dataset.pi===sc.pi;t.setAttribute('fill',colOfPart(+t.dataset.pi).paper);t.setAttribute('font-weight',on?'bold':'normal');});}
 
 /* ---- playback ---- */
 let playing=null;
@@ -1156,9 +1191,8 @@ addEventListener('touchmove',userScrolled,{passive:true});
 addEventListener('keydown',e=>{if(['PageUp','PageDown','Home','End',' '].includes(e.key)&&!/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))userScrolled();});
 $('scoreBox').addEventListener('mousedown',e=>{if(e.target===$('scoreBox')&&e.offsetX>=$('scoreBox').clientWidth)userScrolled();});   // its scroll bar
 $('scoreBox').addEventListener('scroll',()=>{if(performance.now()-lastUserScroll<1200)lastUserScroll=performance.now();},{passive:true});   // a flick keeps gliding
-// The notes that are sounding light up: in the score (orange), and on the neck for the part chosen under Neck shows, or
-// for every part on its own neck.
-const PLAY_COL='#ff8a1c';
+// The notes that are sounding light up in their part's colour: in the score, and on the neck for the part chosen under
+// Neck shows, or for every part on its own neck.
 // where the chosen part lights up: its viol's neck, or (when that one is hidden) the tenor viol's neck or the first shown
 const neckFor=pi=>{const v=violOf(sc.parts[pi]);return st.necks.includes(v)?v:quizNeck();};
 function paintPlay(){
@@ -1166,7 +1200,7 @@ function paintPlay(){
   const each=partNecks();
   (each?sc.parts.map((_,i)=>i):[sc.neckPart>=0&&sc.neckPart<sc.parts.length?sc.neckPart:sc.pi]).forEach(pi=>{
     const v=each?'p'+pi:neckFor(pi),m=p.now[pi];
-    if(m!=null)positions(v).forEach(q=>{if(q.m===m){st.hl[q.k]=PLAY_COL;st.pulse[q.k]=p.beat[pi];}});
+    if(m!=null)positions(v).forEach(q=>{if(q.m===m){st.hl[q.k]=colOfPart(pi).neck;st.pulse[q.k]=p.beat[pi];}});
   });
   drawNecks();
 }
@@ -1176,8 +1210,8 @@ function lightPlaying(pi,i){
   const p=playing;if(!p)return;
   const prev=p.lit[pi];p.lit[pi]=i;
   const map=elsOf(pi);if(!map)return;   // a part that is not drawn
-  if(prev!=null)paintNote(prev,pi===sc.pi&&prev===sc.sel?'#1f5fbf':null,map);
-  paintNote(i,'#e08a00',map);
+  if(prev!=null)markNote(pi,prev,false,map);
+  markNote(pi,i,true,map);
   if(pi!==sc.pi)return;   // the score follows the part you are working on
   const e=(map.get(i)||[])[0];if(!e)return;
   const line=e.closest('svg')||e,r=line.getBoundingClientRect(),box=$('scoreBox').getBoundingClientRect(),inView=r.top>=box.top-2&&r.bottom<=box.bottom+2;
@@ -1282,7 +1316,7 @@ function stopPlay(){
   if(!playing)return;
   clearInterval(playing.loop);playing.timers.forEach(clearTimeout);
   const out=playing.out;try{out.gain.cancelScheduledValues(0);out.gain.setTargetAtTime(0,ac.currentTime,0.03);setTimeout(()=>out.disconnect(),400);}catch(e){}
-  for(const k in playing.lit){const pi=+k,i=playing.lit[k],map=elsOf(pi);if(map)paintNote(i,pi===sc.pi&&i===sc.sel?'#1f5fbf':null,map);}
+  for(const k in playing.lit)markNote(+k,playing.lit[k],false);
   playing=null;$('playBtn').textContent='▶ Play';st.hl={};st.pulse={};drawNecks();followUI();
 }
 function playScore(){
