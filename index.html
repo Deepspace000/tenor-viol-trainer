@@ -52,7 +52,7 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
 </head>
 <body>
 <h1>Tenor Viol Clef Trainer</h1>
-<p class="sub">Read the C clef (alto clef) on the tenor viol da gamba. Click the neck to see the note on the staff. <span style="font-size:12px;opacity:.7">v1.0</span></p>
+<p class="sub">Read the C clef (alto clef) on the tenor viol da gamba. Click the neck to see the note on the staff. <span id="ver" style="font-size:12px;opacity:.7"></span></p>
 
 <div class="panel controls">
   <label>Mode
@@ -168,6 +168,15 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie} = Vex.Flow;
 const $=id=>document.getElementById(id);
+const APP_VERSION='1.1';
+$('ver').textContent='v'+APP_VERSION;
+// iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
+(async()=>{try{
+  if(!/^https?:$/.test(location.protocol))return;
+  const t=await (await fetch(location.pathname+'?check='+Date.now(),{cache:'no-store'})).text();
+  const m=t.match(/const APP_VERSION='([^']+)'/);
+  if(m&&m[1]!==APP_VERSION&&sessionStorage.getItem('reloadedFor')!==m[1]){sessionStorage.setItem('reloadedFor',m[1]);location.replace(location.pathname+'?v='+m[1]);}
+}catch(e){}})();
 const rec={on:false,mic:false,events:[],end:0,bpm:60,t0:0};
 const OPEN=[67,62,57,53,48,43];            // strings 1..6 (high to low)
 const STR_NAME=['G4','D4','A3','F3','C3','G2'];
@@ -203,14 +212,48 @@ KEYS.forEach(k=>{const o=document.createElement('option');o.value=k[0];o.textCon
 const allowed=m=>st.acc!=='diatonic'||spell(m).inKey;
 function positions(){const p=[];OPEN.forEach((o,s)=>{for(let f=0;f<=st.frets;f++)p.push({s,f,m:o+f});});return p;}
 
-/* ---------- audio ---------- */
-let ac;
+/* ---------- audio ----------
+   Safari on iPad and iPhone treats web audio as background sound: Silent Mode (or the side switch) mutes it,
+   and the sound engine stays paused until a tap wakes it. So ask for a "playback" audio session like a music
+   app, wake the engine on every tap, and on older iPads (no audio session setting) keep a silent audio track
+   running, which switches the iPad to music-style sound too. */
+let ac,audioWoken=false,silentEl=null;
+const IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+function setSession(type){try{if(navigator.audioSession&&navigator.audioSession.type!==type)navigator.audioSession.type=type;}catch(e){}}
+function audioCtx(){
+  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
+  if(ac.state!=='running'&&ac.state!=='closed')ac.resume().catch(()=>{});
+  return ac;
+}
+function silentWavUrl(){   // half a second of silence, 8-bit mono
+  const n=4000,b=new ArrayBuffer(44+n),v=new DataView(b),w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  w(0,'RIFF');v.setUint32(4,36+n,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,8000,true);v.setUint32(28,8000,true);v.setUint16(32,1,true);v.setUint16(34,8,true);w(36,'data');v.setUint32(40,n,true);
+  for(let i=0;i<n;i++)v.setUint8(44+i,128);
+  return URL.createObjectURL(new Blob([b],{type:'audio/wav'}));
+}
+function wakeAudio(){
+  setSession(rec.on?'play-and-record':'playback');
+  const c=audioCtx();
+  if(!audioWoken){   // a tiny silent sound started inside the tap is what unlocks Safari
+    try{const s=c.createBufferSource();s.buffer=c.createBuffer(1,1,22050);s.connect(c.destination);s.start(0);}catch(e){}
+    if(c.state==='running')audioWoken=true;
+  }
+  if(IOS&&!navigator.audioSession&&!document.hidden){
+    if(!silentEl){silentEl=new Audio(silentWavUrl());silentEl.loop=true;silentEl.setAttribute('playsinline','');}
+    if(silentEl.paused)silentEl.play().catch(()=>{});
+  }
+}
+['pointerdown','pointerup','touchend','click','keydown'].forEach(ev=>addEventListener(ev,wakeAudio,{capture:true,passive:true}));
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&silentEl)silentEl.pause();});
+// small speakers hardly play the low strings' fundamentals, so keep enough overtones for them to be heard
+const toneCutoff=f=>Math.min(4000,Math.max(1300,f*6));
 function play(m){
   if(!st.sound||(rec.on&&rec.mic))return;
-  ac=ac||new (window.AudioContext||window.webkitAudioContext)();
+  audioCtx();
   const t=ac.currentTime,f=440*Math.pow(2,(m-69)/12);
   const g=ac.createGain(),lp=ac.createBiquadFilter();
-  lp.type='lowpass';lp.frequency.value=Math.min(f*5,3500);lp.Q.value=.7;
+  lp.type='lowpass';lp.frequency.value=toneCutoff(f);lp.Q.value=.7;
   g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.22,t+.12);g.gain.exponentialRampToValueAtTime(.0008,t+1.8);
   [-4,4].forEach(d=>{const o=ac.createOscillator();o.type='sawtooth';o.frequency.value=f;o.detune.value=d;o.connect(lp);o.start(t);o.stop(t+1.9);});
   lp.connect(g).connect(ac.destination);
@@ -575,7 +618,7 @@ function drawRecording(){
 /* ---- playback ---- */
 function tone(m,t,len,dest){
   const f=440*Math.pow(2,(m-69)/12),g=ac.createGain(),lp=ac.createBiquadFilter();
-  lp.type='lowpass';lp.frequency.value=Math.min(f*5,3500);lp.Q.value=.7;
+  lp.type='lowpass';lp.frequency.value=toneCutoff(f);lp.Q.value=.7;
   const a=Math.min(0.08,len*0.3),r=0.25;
   g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.2,t+a);
   g.gain.setValueAtTime(.2,t+Math.max(a,len-0.04));g.gain.linearRampToValueAtTime(0.0001,t+len+r);
@@ -592,7 +635,7 @@ function stopPlay(){
 function playScore(){
   if(playing){stopPlay();return;}
   if(!sc.items.length){stat('Nothing to play yet.');return;}
-  ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();
+  audioCtx();
   const bus=ac.createGain();bus.connect(ac.destination);
   const per=60/sc.bpm/TPQ,timers=[];let t=ac.currentTime+0.15;
   sc.items.forEach(it=>{
@@ -639,6 +682,7 @@ async function startRec(){
   stopPlay();rec.events=[];rec.end=0;rec.on=true;rec.mic=false;rec.t0=nowS();
   $('recBtn').textContent='■ Stop';$('recBtn').classList.add('live');
   try{
+    setSession('play-and-record');   // iPad: the microphone needs a recording audio session
     micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
     micCtx=new (window.AudioContext||window.webkitAudioContext)();
     const an=micCtx.createAnalyser();an.fftSize=4096;micCtx.createMediaStreamSource(micStream).connect(an);
@@ -667,6 +711,7 @@ async function startRec(){
 function stopRec(){
   rec.end=nowS()-rec.t0;
   clearInterval(micTimer);if(micStream)micStream.getTracks().forEach(t=>t.stop());if(micCtx)micCtx.close();micStream=micCtx=null;
+  setSession('playback');
   const add=notesToItems(micNotes());rec.on=false;rec.mic=false;rec.events=[];
   $('recBtn').textContent='● Record (mic)';$('recBtn').classList.remove('live');
   if(add.length){snap();sc.items.splice(sc.cur,0,...add);sc.cur+=add.length;}
