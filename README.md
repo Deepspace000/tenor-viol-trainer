@@ -5,7 +5,7 @@ A web page for learning to read the C clef (alto clef) on the tenor viol da gamb
 - The look: a medieval page of dark oak, parchment and gilding. Each neck is wood with its own grain and shade, with seven gut frets tied round it (as on a real viol), a bone nut and gut strings.
 - The score looks like the printed edition: a white page, Times lettering, each piece's title with the composer under it, C and cut C as printed, bar numbers at the start of each line, and (Notes > Lines as printed) the same lines as the PDF.
 - Your score is kept on the device you use: leave the page (another tab, app or site) and come back, or reload it, and the score is as you left it. On an iPad the music stops while you are away, and the first tap back wakes the sound again.
-- The range of the piece: on each neck, the notes from the lowest to the highest its part plays in the piece in view (the one playing, the selected note's, or the one at the top of the score) have a slight glow in the viol's colour.
+- The notes of the piece: on each neck, every note its part plays in the piece in view (the one playing, the selected note's, or the one at the top of the score) is ringed in the viol's colour and glows, brightest where the part spends most of its time (its tessitura); the other notes step back a little.
 - Notes shown (Settings): each note on the neck low and high (every place it can be played), only low (open strings first), or only high on the neck.
 
 Open it here: https://deepspace000.github.io/tenor-viol-trainer/

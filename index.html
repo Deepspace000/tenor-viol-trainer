@@ -290,7 +290,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='2.2';
+const APP_VERSION='2.3';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -501,9 +501,9 @@ function drawNecks(){
   wrap.style.gridTemplateColumns=`repeat(${cols},minmax(0,1fr))`;
   const W=Math.round(Math.max(minW,Math.min(4000,H*cell/per)));
   // the wood is drawn again only when the size changes; the notes on it whenever they light up
-  const rg=neckRanges();
+  const pn=pieceNotes();
   wrap.querySelectorAll('.neck').forEach(el=>{
-    const v=el.dataset.v,L=el.querySelector('.nlab'),b=boardSvg(v,W,H,compact,per),d=dotsSvg(v,W,H,compact,rg[v]);
+    const v=el.dataset.v,L=el.querySelector('.nlab'),b=boardSvg(v,W,H,compact,per),d=dotsSvg(v,W,H,compact,pn[v]);
     const lab=`<b style="color:${colOfNeck(v).title}">● ${neckName(v)}</b><span class="tun">${VIOLS[violAt(v)].open.slice().reverse().map(m=>SHARP[pc(m)]).join(' ')}</span>`;
     if(L.dataset.s!==lab){L.innerHTML=lab;L.dataset.s=lab;}
     if(boardDrawn[v]!==b){el.querySelector('.nboard').innerHTML=b;boardDrawn[v]=b;}
@@ -557,16 +557,20 @@ function boardSvg(v,W,H,compact,per){
 }
 // The notes on a neck, a dot for each; the ones that light up are drawn last, bigger and ringed, and while the music
 // plays they glow and the other dots step back
-function dotsSvg(v,W,H,compact,range){
+function dotsSvg(v,W,H,compact,notes){
   const {top,gap,X}=neckGeom(W,compact),dim=!!playing,lit=[],rc=colOfNeck(v).neck;
+  // the notes of the piece in view, in the places Notes shown picks: ringed in the viol's colour, glowing brighter where
+  // the part spends most of its time (its tessitura); the other notes step back a little
+  const pk=new Map();if(notes)notes.forEach((w,m)=>placesFor(v,m).forEach(q=>pk.set(q.k,w)));
   let s=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
   positions(v).forEach(p=>{
     if(!allowed(p.m))return;
     const hl=st.hl[p.k],lab=spell(p.m).pcname,x=X(p.f),y=top+p.s*gap;
     if(hl){lit.push({p,hl,lab,x,y});return;}
-    s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"${dim?' opacity=".4"':''}>`+
-       (range&&p.m>=range[0]&&p.m<=range[1]?`<circle class="rg" cx="${x}" cy="${y}" r="22" fill="${rc}" opacity=".42"/>`:'')+   // (in the piece's range)
-       `<circle cx="${x}" cy="${y}" r="15" fill="${NAT.includes(pc(p.m))?'#f2e7cc':'#ccb489'}" stroke="#24140a" stroke-width="1.5"/>`+
+    const w=pk.get(p.k),inP=w!=null,op=dim?(inP?'.8':'.3'):(pk.size&&!inP?'.62':'');
+    s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"${op?` opacity="${op}"`:''}>`+
+       (inP?`<circle class="rg" cx="${x}" cy="${y}" r="${(19+6*w).toFixed(1)}" fill="${rc}" opacity="${(0.25+0.6*Math.pow(w,0.7)).toFixed(2)}"/>`:'')+
+       `<circle cx="${x}" cy="${y}" r="15" fill="${NAT.includes(pc(p.m))?'#f2e7cc':'#ccb489'}" stroke="${inP?rc:'#24140a'}" stroke-width="${inP?3:1.5}"/>`+
        (st.labels&&!st.hideLabels?`<text x="${x}" y="${y+5}" text-anchor="middle" font-size="${lab.length>1?12:15}" fill="#1a1006" font-family="Georgia">${lab}</text>`:'')+'</g>';
   });
   lit.forEach(({p,hl,lab,x,y})=>{
@@ -576,17 +580,17 @@ function dotsSvg(v,W,H,compact,range){
   });
   return s+'</svg>';
 }
-// where a note shows on a neck: every place it can be played, or only the lowest (open strings first) or the highest
-/* ---------- the range of the piece on each neck ----------
-   Every neck has a slight glow, in its viol's colour, on the notes from the lowest to the highest its part plays in the
-   piece now in view: the piece that is playing, or the selected note's, or the one at the top of the score. */
+/* ---------- the notes of the piece on each neck ----------
+   Every note a part plays in the piece now in view (the piece that is playing, or the selected note's, or the one at the
+   top of the score) is marked on its neck in the viol's colour, the brighter the longer the part spends on it. */
 let scoreVer=0,rangeKey='',rangeOf={},rangeT=0;   // (scoreVer goes up whenever the score is drawn again)
 function topNote(){   // the first note of the part you work on that is in view in the score
   const box=$('scoreBox').getBoundingClientRect(),list=[...noteEls];let lo=0,hi=list.length-1,ans=null;
   while(lo<=hi){const mid=(lo+hi)>>1,r=list[mid][1][0].getBoundingClientRect();if(r.bottom>=box.top){ans=list[mid][0];hi=mid-1;}else lo=mid+1;}
   return ans;
 }
-function neckRanges(){
+// for each neck: its part's notes in the piece, each with how much of the piece it takes (1 for the most used)
+function pieceNotes(){
   const items=sc.items;let i=-1;
   if(items.length){i=playing&&playing.lit[sc.pi]!=null?playing.lit[sc.pi]:sc.sel>=0?sc.sel:topNote();if(i==null||i<0)i=0;i=Math.min(i,items.length-1);while(i>0&&!items[i].sec)i--;}
   const slots=neckSlots(),key=scoreVer+':'+sc.pi+':'+i+':'+slots.map(s=>s.id+s.v).join()+':'+sc.parts.map(violOf).join();
@@ -594,16 +598,18 @@ function neckRanges(){
   rangeKey=key;rangeOf={};if(i<0)return rangeOf;
   let e=i+1;while(e<items.length&&!items[e].sec)e++;
   const P=partTimes(leadPart()),t0=P[sc.pi][i],t1=e<items.length?P[sc.pi][e]:Infinity;   // the piece, in time: the same for every part
-  const ranges=sc.parts.map((pt,pi)=>{let lo=Infinity,hi=-Infinity;pt.items.forEach((it,k)=>{const t=P[pi][k];if(it.m!=null&&t>=t0&&t<t1){if(it.m<lo)lo=it.m;if(it.m>hi)hi=it.m;}});return lo<=hi?[lo,hi]:null;});
+  const dur=sc.parts.map((pt,pi)=>{const w={};pt.items.forEach((it,k)=>{const t=P[pi][k];if(it.m!=null&&t>=t0&&t<t1)w[it.m]=(w[it.m]||0)+it.d;});return w;});
   slots.forEach(sl=>{
     let pis=sl.pi!=null?[sl.pi]:sc.parts.map((_,k)=>k).filter(k=>violOf(sc.parts[k])===sl.v);   // a part's own neck, or the neck of its viol
     if(!pis.length&&neckFor(sc.pi)===sl.id)pis=[sc.pi];   // (the part shown on a neck no part plays)
-    const rs=pis.map(k=>ranges[k]).filter(Boolean);
-    if(rs.length)rangeOf[sl.id]=[Math.min(...rs.map(r=>r[0])),Math.max(...rs.map(r=>r[1]))];
+    const w={};pis.forEach(k=>{for(const m in dur[k])w[m]=(w[m]||0)+dur[k][m];});
+    const most=Math.max(0,...Object.values(w));
+    if(most>0)rangeOf[sl.id]=new Map(Object.keys(w).map(m=>[+m,w[m]/most]));
   });
   return rangeOf;
 }
 $('scoreBox').addEventListener('scroll',()=>{clearTimeout(rangeT);rangeT=setTimeout(()=>{if(!playing&&sc.sel<0)drawNecks();},200);},{passive:true});   // another piece scrolled into view
+// where a note shows on a neck: every place it can be played, or only the lowest (open strings first) or the highest
 function placesFor(v,m){
   const ps=positions(v).filter(p=>p.m===m);
   if(st.place==='all'||ps.length<2)return ps;
