@@ -61,7 +61,7 @@ input[type=range],input[type=checkbox]{accent-color:var(--rub)}
 #neckWrap .ndots .dot{pointer-events:auto}
 .dot{cursor:pointer}
 .dot circle{transition:fill .1s}
-.dot:hover circle{stroke:var(--gold);stroke-width:3}
+.dot:hover circle:not(.rg){stroke:var(--gold);stroke-width:3}
 /* a note that lights up on a neck pops out a little each time it is played */
 .dot.lit .main{animation:pop .3s ease-out;transform-box:fill-box;transform-origin:center}
 @keyframes pop{from{transform:scale(1.45)}to{transform:scale(1)}}
@@ -290,7 +290,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='2.1';
+const APP_VERSION='2.2';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -501,8 +501,9 @@ function drawNecks(){
   wrap.style.gridTemplateColumns=`repeat(${cols},minmax(0,1fr))`;
   const W=Math.round(Math.max(minW,Math.min(4000,H*cell/per)));
   // the wood is drawn again only when the size changes; the notes on it whenever they light up
+  const rg=neckRanges();
   wrap.querySelectorAll('.neck').forEach(el=>{
-    const v=el.dataset.v,L=el.querySelector('.nlab'),b=boardSvg(v,W,H,compact,per),d=dotsSvg(v,W,H,compact);
+    const v=el.dataset.v,L=el.querySelector('.nlab'),b=boardSvg(v,W,H,compact,per),d=dotsSvg(v,W,H,compact,rg[v]);
     const lab=`<b style="color:${colOfNeck(v).title}">● ${neckName(v)}</b><span class="tun">${VIOLS[violAt(v)].open.slice().reverse().map(m=>SHARP[pc(m)]).join(' ')}</span>`;
     if(L.dataset.s!==lab){L.innerHTML=lab;L.dataset.s=lab;}
     if(boardDrawn[v]!==b){el.querySelector('.nboard').innerHTML=b;boardDrawn[v]=b;}
@@ -556,14 +557,16 @@ function boardSvg(v,W,H,compact,per){
 }
 // The notes on a neck, a dot for each; the ones that light up are drawn last, bigger and ringed, and while the music
 // plays they glow and the other dots step back
-function dotsSvg(v,W,H,compact){
-  const {top,gap,X}=neckGeom(W,compact),dim=!!playing,lit=[];
+function dotsSvg(v,W,H,compact,range){
+  const {top,gap,X}=neckGeom(W,compact),dim=!!playing,lit=[],rc=colOfNeck(v).neck;
   let s=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
   positions(v).forEach(p=>{
     if(!allowed(p.m))return;
     const hl=st.hl[p.k],lab=spell(p.m).pcname,x=X(p.f),y=top+p.s*gap;
     if(hl){lit.push({p,hl,lab,x,y});return;}
-    s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"${dim?' opacity=".4"':''}><circle cx="${x}" cy="${y}" r="15" fill="${NAT.includes(pc(p.m))?'#f2e7cc':'#ccb489'}" stroke="#24140a" stroke-width="1.5"/>`+
+    s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"${dim?' opacity=".4"':''}>`+
+       (range&&p.m>=range[0]&&p.m<=range[1]?`<circle class="rg" cx="${x}" cy="${y}" r="22" fill="${rc}" opacity=".42"/>`:'')+   // (in the piece's range)
+       `<circle cx="${x}" cy="${y}" r="15" fill="${NAT.includes(pc(p.m))?'#f2e7cc':'#ccb489'}" stroke="#24140a" stroke-width="1.5"/>`+
        (st.labels&&!st.hideLabels?`<text x="${x}" y="${y+5}" text-anchor="middle" font-size="${lab.length>1?12:15}" fill="#1a1006" font-family="Georgia">${lab}</text>`:'')+'</g>';
   });
   lit.forEach(({p,hl,lab,x,y})=>{
@@ -574,6 +577,33 @@ function dotsSvg(v,W,H,compact){
   return s+'</svg>';
 }
 // where a note shows on a neck: every place it can be played, or only the lowest (open strings first) or the highest
+/* ---------- the range of the piece on each neck ----------
+   Every neck has a slight glow, in its viol's colour, on the notes from the lowest to the highest its part plays in the
+   piece now in view: the piece that is playing, or the selected note's, or the one at the top of the score. */
+let scoreVer=0,rangeKey='',rangeOf={},rangeT=0;   // (scoreVer goes up whenever the score is drawn again)
+function topNote(){   // the first note of the part you work on that is in view in the score
+  const box=$('scoreBox').getBoundingClientRect(),list=[...noteEls];let lo=0,hi=list.length-1,ans=null;
+  while(lo<=hi){const mid=(lo+hi)>>1,r=list[mid][1][0].getBoundingClientRect();if(r.bottom>=box.top){ans=list[mid][0];hi=mid-1;}else lo=mid+1;}
+  return ans;
+}
+function neckRanges(){
+  const items=sc.items;let i=-1;
+  if(items.length){i=playing&&playing.lit[sc.pi]!=null?playing.lit[sc.pi]:sc.sel>=0?sc.sel:topNote();if(i==null||i<0)i=0;i=Math.min(i,items.length-1);while(i>0&&!items[i].sec)i--;}
+  const slots=neckSlots(),key=scoreVer+':'+sc.pi+':'+i+':'+slots.map(s=>s.id+s.v).join()+':'+sc.parts.map(violOf).join();
+  if(key===rangeKey)return rangeOf;
+  rangeKey=key;rangeOf={};if(i<0)return rangeOf;
+  let e=i+1;while(e<items.length&&!items[e].sec)e++;
+  const P=partTimes(leadPart()),t0=P[sc.pi][i],t1=e<items.length?P[sc.pi][e]:Infinity;   // the piece, in time: the same for every part
+  const ranges=sc.parts.map((pt,pi)=>{let lo=Infinity,hi=-Infinity;pt.items.forEach((it,k)=>{const t=P[pi][k];if(it.m!=null&&t>=t0&&t<t1){if(it.m<lo)lo=it.m;if(it.m>hi)hi=it.m;}});return lo<=hi?[lo,hi]:null;});
+  slots.forEach(sl=>{
+    let pis=sl.pi!=null?[sl.pi]:sc.parts.map((_,k)=>k).filter(k=>violOf(sc.parts[k])===sl.v);   // a part's own neck, or the neck of its viol
+    if(!pis.length&&neckFor(sc.pi)===sl.id)pis=[sc.pi];   // (the part shown on a neck no part plays)
+    const rs=pis.map(k=>ranges[k]).filter(Boolean);
+    if(rs.length)rangeOf[sl.id]=[Math.min(...rs.map(r=>r[0])),Math.max(...rs.map(r=>r[1]))];
+  });
+  return rangeOf;
+}
+$('scoreBox').addEventListener('scroll',()=>{clearTimeout(rangeT);rangeT=setTimeout(()=>{if(!playing&&sc.sel<0)drawNecks();},200);},{passive:true});   // another piece scrolled into view
 function placesFor(v,m){
   const ps=positions(v).filter(p=>p.m===m);
   if(st.place==='all'||ps.length<2)return ps;
@@ -1059,10 +1089,12 @@ function labelNotes(svg,notes,keys,stave){
   });
 }
 function drawRecording(){
+  scoreVer++;
   // hold the score's height while it is rebuilt, so the page never gets shorter for a moment and jumps
   const el=$('recscore');el.style.minHeight=el.offsetHeight+'px';
   try{(fullView()?drawFullScore:drawScore)(el);}finally{el.style.minHeight='';}
   if(!rec.on)buildFrom();
+  drawNecks();   // (the range of the piece on the necks may have changed)
 }
 function drawScore(el){
   el.innerHTML='';noteElsAll=null;
