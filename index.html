@@ -170,7 +170,7 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='1.2';
+const APP_VERSION='1.3';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -478,7 +478,18 @@ $('snd').onchange=()=>{st.sound=$('snd').checked;};
 $('next').onclick=newQ;
 $('open').onclick=()=>{$('mode').value='explore';setMode();st.hl={};drawNeck();drawStaff(OPEN.slice().reverse());msg('The six open strings: G C F A D G');};
 addEventListener('keydown',e=>{if(e.key==='Enter'&&$('next').style.display!=='none')newQ();});
-let resizeT=0;addEventListener('resize',()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{drawStaff(st.show||[]);drawRecording();},200);});
+// Safari on iPad changes the window height while you scroll (the address bar slides in and out). The score only
+// depends on the width, so only a real change of width (turning the iPad) redraws it, and you keep your place.
+let resizeT=0,lastW=innerWidth;
+addEventListener('resize',()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{if(innerWidth===lastW)return;lastW=innerWidth;keepScroll(()=>{drawStaff(st.show||[]);drawRecording();});},200);});
+function keepScroll(fn){
+  // remember the note at the top of the screen and put it back in the same place after redrawing
+  let anchor=null,off=0;
+  for(const [i,els] of noteEls){const r=els[0].getBoundingClientRect();if(r.bottom>0&&r.top<innerHeight){anchor=i;off=r.top;break;}}
+  const y=scrollY;fn();
+  const els=anchor!=null&&noteEls.get(anchor);
+  if(els&&els[0])scrollBy(0,els[0].getBoundingClientRect().top-off);else scrollTo(0,y);
+}
 
 /* ================= SCORE ================= */
 const TPQ=16;                                   // ticks per crotchet
@@ -587,7 +598,12 @@ function labelNotes(svg,notes,keys,stave){
   });
 }
 function drawRecording(){
-  const el=$('recscore');el.innerHTML='';
+  // hold the score's height while it is rebuilt, so the page never gets shorter for a moment and jumps
+  const el=$('recscore');el.style.minHeight=el.offsetHeight+'px';
+  try{drawScore(el);}finally{el.style.minHeight='';}
+}
+function drawScore(el){
+  el.innerHTML='';
   $('rectitle').textContent=$('title').value||'Tenor viol';
   const nReal=sc.items.length,bars=splitBars(viewItems());
   if(!bars.length){el.innerHTML='<div class="ph">Pick a rhythm, then click notes on the neck. They appear here.</div>';noteEls=new Map();return;}
@@ -681,13 +697,25 @@ function tone(m,t,len,dest){
   lp.connect(g).connect(dest||ac.destination);
 }
 let playing=null;
+// While the music plays the page follows it line by line. As soon as you scroll yourself it stops following and
+// leaves the page where you put it; scroll back to the playing line and it follows again.
+let lastUserScroll=0;
+const userScrolled=()=>{lastUserScroll=performance.now();if(playing)playing.follow=false;};
+addEventListener('wheel',userScrolled,{passive:true});
+addEventListener('touchmove',userScrolled,{passive:true});
+addEventListener('keydown',e=>{if(['PageUp','PageDown','Home','End',' '].includes(e.key)&&!/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))userScrolled();});
+addEventListener('mousedown',e=>{if(e.clientX>=document.documentElement.clientWidth||e.clientY>=document.documentElement.clientHeight)userScrolled();});   // the scroll bar
+addEventListener('scroll',()=>{if(performance.now()-lastUserScroll<1200)lastUserScroll=performance.now();},{passive:true});   // a flick keeps gliding
 // the note that is sounding lights up in the score (orange) and on the neck
 function lightPlaying(i){
   if(!playing)return;
   if(playing.lit!=null)paintNote(playing.lit,playing.lit===sc.sel?'#1f5fbf':null);
   playing.lit=i;paintNote(i,'#e08a00');
   const it=sc.items[i];if(it.m!=null)lightNeck(it.m);else{st.hl={};drawNeck();}
-  const e=(noteEls.get(i)||[])[0];if(e)e.scrollIntoView({block:'nearest',inline:'nearest'});
+  const e=(noteEls.get(i)||[])[0];if(!e)return;
+  const line=e.closest('svg')||e,r=line.getBoundingClientRect(),inView=r.top>=0&&r.bottom<=innerHeight;
+  if(!playing.follow&&inView&&performance.now()-lastUserScroll>1500)playing.follow=true;   // you came back to the music
+  if(playing.follow&&!inView)line.scrollIntoView({block:'nearest'});
 }
 function stopPlay(){
   if(!playing)return;
@@ -709,7 +737,7 @@ function playScore(){
     t+=len;
   }
   timers.push(setTimeout(stopPlay,(t-ac.currentTime)*1000+400));
-  playing={timers,bus,lit:null};$('playBtn').textContent='■ Stop';
+  playing={timers,bus,lit:null,follow:true};$('playBtn').textContent='■ Stop';
   if(from>0)stat('Playing from note '+(from+1)+'. Deselect the note (click it again) to play from the start.');
 }
 
