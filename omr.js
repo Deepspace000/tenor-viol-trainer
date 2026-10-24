@@ -819,7 +819,8 @@ function omrReadPage(imgData) {
       const b = omrReadNumber(clean, W, H, st.tsBox[0] - 2, st.tsBox[1] + 2, Math.round(st.top + 2.15 * p), Math.round(st.bot + 0.2 * p));
       if (a && a <= 16 && [1, 2, 4, 8, 16].includes(b)) ts = [a, b];
     }
-    if (!ts && st.tsSym) ts = st.tsSym;   // C or cut C
+    let tsC = null;
+    if (!ts && st.tsSym) { ts = st.tsSym; tsC = st.tsSym[0] === 2 ? 'C|' : 'C'; }   // C or cut C (shown as printed)
     // First and second endings: a thin line above the top staff of a system, with a hook down at its start and a
     // number under it. (A beam is thick, and a slur has no straight hook.)
     const voltas = [];
@@ -847,7 +848,7 @@ function omrReadPage(imgData) {
         if (n && n <= 4) voltas.push({ n, x0: f.x0, x1: f.x1, y: f.y });            // no number, no ending
       });
     }
-    out.staves.push({ p, left: st.left, right: st.right, top: st.top, bot: st.bot, fifths, keyBox: accs.length ? [accs[0].minx, accs[accs.length - 1].maxx] : null, droppedAcc: !!dropped, musicStart: st.musicStart, barX, barRep, elems, totals, acc, ts, endsFinal,
+    out.staves.push({ p, left: st.left, right: st.right, top: st.top, bot: st.bot, fifths, keyBox: accs.length ? [accs[0].minx, accs[accs.length - 1].maxx] : null, droppedAcc: !!dropped, musicStart: st.musicStart, barX, barRep, elems, totals, acc, ts, tsC, endsFinal,
       clefType: st.clefType || null, sys: sysOf[si], pos: posOf[si], sysSize: sizeOf[si], voltas });
   });
   // the staves of one system share the endings drawn over its top staff, and its time signature
@@ -861,8 +862,9 @@ function omrReadPage(imgData) {
       if (withTs.length * 2 > grp.length) {
         const cnt = {}; withTs.forEach(s => { const k2 = s.ts.join('/'); cnt[k2] = (cnt[k2] || 0) + 1; });
         const best = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0].split('/').map(Number);
-        grp.forEach(s => s.ts = best);
-      } else grp.forEach(s => s.ts = null);           // one staff alone with a time signature was a misreading
+        const sym = withTs.filter(s => s.tsC).length * 2 > withTs.length ? withTs.find(s => s.tsC).tsC : null;   // C or cut C, if most staves show it
+        grp.forEach(s => { s.ts = best; s.tsC = sym; });
+      } else grp.forEach(s => { s.ts = null; s.tsC = null; });           // one staff alone with a time signature was a misreading
     }
   }
   // Keep the parts of a system together: a bar lasts as long in every staff. If one staff's bar came out short (a note
@@ -939,7 +941,7 @@ function omrSettle(pages, clef) {
   // pieces from time signatures and final bar lines
   let pieces = [], cur = null, prevFinal = true;
   // (in a full score the pieces are decided for the whole system beforehand: forceSec)
-  for (const s of rows) { const here = s.forceSec != null ? s.forceSec : !!s.ts || prevFinal; if (!cur || here) { cur = { staves: [], ts: s.ts || null }; pieces.push(cur); } cur.staves.push(s); prevFinal = !!s.endsFinal; }
+  for (const s of rows) { const here = s.forceSec != null ? s.forceSec : !!s.ts || prevFinal; if (!cur || here) { cur = { staves: [], ts: s.ts || null, sym: s.tsC || null }; pieces.push(cur); } cur.staves.push(s); prevFinal = !!s.endsFinal; }
   // inside a piece: a lone staff that disagrees with its neighbours takes theirs; a lasting change starts a new piece
   const split = [];
   for (const pc of pieces) {
@@ -950,10 +952,10 @@ function omrSettle(pages, clef) {
     }
     if (pc.staves[0].forceSec != null) {   // a piece of a full score keeps one key: the one most of its staves show
       const cnt = {}; k.forEach(v => cnt[v] = (cnt[v] || 0) + 1);
-      split.push({ staves: pc.staves, ts: pc.ts, key: +Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] }); continue;
+      split.push({ staves: pc.staves, ts: pc.ts, sym: pc.sym, key: +Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] }); continue;
     }
     let part = null;
-    pc.staves.forEach((s, i) => { if (!part || k[i] !== part.key) { part = { staves: [], ts: part ? null : pc.ts, key: k[i] }; split.push(part); } part.staves.push(s); });
+    pc.staves.forEach((s, i) => { if (!part || k[i] !== part.key) { part = { staves: [], ts: part ? null : pc.ts, sym: part ? null : pc.sym, key: k[i] }; split.push(part); } part.staves.push(s); });
   }
   // the music's own accidentals as a second opinion
   for (const pc of split) {
@@ -977,16 +979,24 @@ function omrSettle(pages, clef) {
     }
   }
   let lastTs = null;
-  const titleOf = s => {   // the biggest words between this system and the one above it (the piece's title)
+  const headOf = s => {   // the piece's title (the biggest words between this system and the one above it), and its composer
     // (only real words count: some PDFs print the music itself as characters of a music font)
     const pg = s._page, words = pg && pg.texts ? pg.texts.filter(t => /[A-Za-zÀ-ɏ]{2,}/.test(t.str)) : [];
-    if (!words.length) return null;
+    if (!words.length) return { title: null, by: null };
     const top = pg.staves.find(x => x.sys === s.sys) || s, i = pg.staves.indexOf(top), above = i > 0 ? pg.staves[i - 1].bot + 2 * s.p : 0;
     const sizes = words.map(t => t.size).sort((a, b) => a - b), med = sizes[sizes.length >> 1];
     const c = words.filter(t => t.y < top.top - 1.5 * s.p && t.y > above && t.size >= 1.25 * med).sort((a, b) => b.size - a.size)[0];
-    return c ? words.filter(t => Math.abs(t.y - c.y) < 0.3 * c.size && Math.abs(t.size - c.size) < 0.1 * c.size).sort((a, b) => a.x - b.x).map(t => t.str).join(' ').trim() : null;
+    if (!c) return { title: null, by: null };
+    const title = words.filter(t => Math.abs(t.y - c.y) < 0.3 * c.size && Math.abs(t.size - c.size) < 0.1 * c.size).sort((a, b) => a.x - b.x).map(t => t.str).join(' ').trim();
+    // the composer: smaller lines on the right half of the page, between the title and the music
+    const mid = (top.left + top.right) / 2, lines = {};
+    pg.texts.filter(t => t.y > c.y + 0.3 * c.size && t.y < top.top - 0.5 * s.p && t.x > mid && t.size < 0.9 * c.size && !/^[A-Za-z]$/.test(t.str))   // (a lone letter is a music-font sign)
+      .forEach(t => { const k = Math.round(t.y / (0.6 * t.size)); (lines[k] = lines[k] || []).push(t); });
+    const by = Object.keys(lines).sort((a, b) => a - b).map(k => lines[k].sort((a, b) => a.x - b.x).map(t => t.str).join(' ').replace(/\s+/g, ' ').trim())
+      .filter(l => /[A-Za-zÀ-ɏ]{2,}/.test(l)).join('\n');
+    return { title: title || null, by: by || null };
   };
-  for (const pc of split) { if (pc.ts) lastTs = pc.ts; pc.staves.forEach((s, i) => { s.keyFinal = pc.key; s.secTs = pc.ts; s.pieceTs = lastTs; s.sec = i === 0 ? { k: pc.key, ts: pc.ts, title: titleOf(s) } : null; s.keyFromNotes = !!pc.keyFromNotes; }); }
+  for (const pc of split) { if (pc.ts) lastTs = pc.ts; pc.staves.forEach((s, i) => { s.keyFinal = pc.key; s.secTs = pc.ts; s.pieceTs = lastTs; s.sec = i === 0 ? Object.assign({ k: pc.key, ts: pc.ts, sym: pc.ts ? pc.sym || null : null }, headOf(s)) : null; s.keyFromNotes = !!pc.keyFromNotes; }); }
   return split;
 }
 
@@ -1028,7 +1038,7 @@ function omrItems(page, clef, fifthsOverride, barT) {
       tied = e.tie ? { item, dia } : null;
     }
     if (endAt.has(bar) && items.length > start) items[items.length - 1].re = true;
-    if (st.sec && items.length > start) items[start].sec = { k: fifthsOverride != null ? fifthsOverride : st.sec.k, ts: st.sec.ts, title: st.sec.title || null, clef: st.clefType || null };
+    if (st.sec && items.length > start) items[start].sec = { k: fifthsOverride != null ? fifthsOverride : st.sec.k, ts: st.sec.ts, sym: st.sec.sym || null, title: st.sec.title || null, by: st.sec.by || null, clef: st.clefType || null };
   }
   return items;
 }

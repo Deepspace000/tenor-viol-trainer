@@ -1,6 +1,10 @@
-# Tenor Viol Clef Trainer
+# Goat Viols
 
-A web page for learning to read the C clef (alto clef) on the tenor viol da gamba.
+A web page for learning to read the C clef (alto clef) on the tenor viol da gamba, and for playing consort music on treble, tenor and bass viols. (It used to be called Tenor Viol Clef Trainer.)
+
+- The look: a medieval page of dark oak, parchment and gilding. Each neck is wood with its own grain and shade, with seven gut frets tied round it (as on a real viol), a bone nut and gut strings.
+- The score looks like the printed edition: a white page, Times lettering, each piece's title with the composer under it, C and cut C as printed, bar numbers at the start of each line, and (Notes > Lines as printed) the same lines as the PDF.
+- Notes shown (Settings): each note on the neck low and high (every place it can be played), only low (open strings first), or only high on the neck.
 
 Open it here: https://deepspace000.github.io/tenor-viol-trainer/
 
