@@ -4,8 +4,10 @@ A web page for learning to read the C clef (alto clef) on the tenor viol da gamb
 
 Open it here: https://deepspace000.github.io/tenor-viol-trainer/
 
+- One screen: the viol neck at the top, the score underneath scrolling in its own box, and fold-down menus (Practise, Notes, Parts, File, Settings, About).
 - The viol neck with every note named. Tap a note to hear it and see it on the staff.
 - Quizzes: find a staff note on the neck, name a note on the neck, name a note on the staff.
+- Practise: open strings, major and minor scales (natural, harmonic, melodic), chromatic scale, arpeggios, scales in thirds, frets 0 to 4 on each string, and string crossing, from any starting note, in one or two octaves, written into the score to play along with.
 - Any key signature, and alto, tenor, octave treble, treble or bass clef.
 - A score you write by tapping the neck: breve, semibreve, minim, crotchet, quaver and semiquaver, with dots, rests, ties across bar lines, any time signature (4/1, 6/2, 4/2, 3/4 ...) and tempo. Play it back, save it as .json and load it again, or save it as a PDF.
 - Note names and movable-do sol-fa under every note. The note that is playing lights up in the score and on the neck.
