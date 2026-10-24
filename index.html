@@ -28,6 +28,9 @@ button.on,button.fold.open{background:var(--gold);color:#1a1410;border-color:var
 .dot{cursor:pointer}
 .dot circle{transition:fill .1s}
 .dot:hover circle{stroke:var(--gold);stroke-width:3}
+/* a note that lights up on a neck pops out a little each time it is played */
+.dot.lit .main{animation:pop .3s ease-out;transform-box:fill-box;transform-origin:center}
+@keyframes pop{from{transform:scale(1.45)}to{transform:scale(1)}}
 #neckWrap,#recscore{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 #statusLine{flex:none;display:flex;gap:14px;align-items:baseline;min-height:22px;overflow:hidden}
 #msg{font-size:16px;white-space:nowrap}
@@ -83,11 +86,13 @@ span.pname{min-width:0;color:var(--dim)}
 <div id="topbar">
   <span class="appname">Tenor Viol</span><span id="ver"></span>
   <button id="playBtn">▶ Play</button>
+  <button id="followBtn" class="on" title="Go to the music that is playing and keep it in view (scrolling by hand pauses it)">Follow score</button>
   <label>From <select id="fromSel" style="max-width:220px"></select></label>
   <label>Bar <input type="number" id="fromBar" min="1" placeholder="–" style="width:58px"></label>
   <label>Tempo <input type="number" id="bpm" value="60" min="30" max="240" style="width:62px"></label>
   <label id="partPick" style="display:none">Part <select id="partSel"></select></label>
   <button id="fullBtn" style="display:none" title="Show every part's staff together, or only the part you are working on">All parts</button>
+  <label id="neckPick" style="display:none" title="The part whose notes light up on the neck while the music plays">Neck shows <select id="neckSel"></select></label>
   <span style="flex:1"></span>
   <button class="fold" data-p="pPrac" title="Exercises: open strings, scales, arpeggios">Practise ▾</button>
   <button class="fold" data-p="pNotes" title="Rhythms, dots, rests and editing">Notes ▾</button>
@@ -217,7 +222,7 @@ span.pname{min-width:0;color:var(--dim)}
   </table>
   <p>Tuned <b>G C F A D G</b> (low to high): fourths with a major third between strings 3 and 4 (F–A). It sits a fourth above the bass viol (D G C E A D). The tenor is non-transposing. Typically 7 gut frets, tied on and movable; they are a semitone apart, so the names here are the equal-tempered ones (real viols often use meantone).</p>
   <p><b>Clefs:</b> the tenor viol usually reads <b>alto clef</b> (C clef on the middle line, which is middle C). Some editions use tenor clef (C on the 4th line) or octave treble, and high parts can be in treble at pitch. Landmarks: middle line = C4; top line = G4 (open 1st string); bottom line = F3 (open 4th string).</p>
-  <p><b>Treble and bass viols:</b> the treble viol is tuned D3 G3 C4 E4 A4 D5 and reads treble clef. The bass viol is tuned D2 G2 C3 E3 A3 D4 and reads bass clef, with alto clef for high passages. Their necks can be shown under Settings. When a score plays, each part lights up on the neck of its viol (set under Parts).</p>
+  <p><b>Treble and bass viols:</b> the treble viol is tuned D3 G3 C4 E4 A4 D5 and reads treble clef. The bass viol is tuned D2 G2 C3 E3 A3 D4 and reads bass clef, with alto clef for high passages. Their necks can be shown under Settings. When a score plays, the part chosen under Neck shows (in the toolbar) lights up on the neck of its viol, or every part does, each on its own viol's neck (set under Parts).</p>
   <p><small>Sources: <a href="https://vdgsa.org/_files/ugd/d4b545_fba5a064eaad4df0b0ec9005c26cd76c.pdf">VdGSA viol help sheet</a>, <a href="https://saraband.com.au/altoclef.htm">Saraband: Viola &amp; Tenor Viol</a>, <a href="https://www.youngcomposersaward.co.uk/writing-for-viol-and-voices">Writing for viol and voices</a>.</small></p>
 </div>
 
@@ -245,7 +250,7 @@ span.pname{min-width:0;color:var(--dim)}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='1.6';
+const APP_VERSION='1.7';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -267,12 +272,14 @@ const SHARP=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const FLAT =['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
 const NAT=[0,2,4,5,7,9,11];
 const st={mode:'explore',clef:'alto',acc:'all',key:0,frets:7,labels:true,sound:true,
-  show:[],target:null,answered:false,right:0,total:0,streak:0,pending:null,hl:{},necks:['tenor'],sv:'tenor',neckFrac:null,zoom:1};
-// remembered on this device: the necks shown, the room they take (the bar above the score) and the size of the music.
+  show:[],target:null,answered:false,right:0,total:0,streak:0,pending:null,hl:{},necks:['tenor'],sv:'tenor',neckFrac:null,zoom:1,follow:true,pulse:{}};
+// remembered on this device: the necks shown, the room they take (the bar above the score), the size of the music
+// and Follow score.
 // st.sv is the viol whose notes the staff under Settings shows.
 try{const n=JSON.parse(localStorage.getItem('tenor-viol-necks')||'null');if(Array.isArray(n)&&n.some(v=>VIOLS[v]))st.necks=VIOL_ORDER.filter(v=>n.includes(v));
   const f=+localStorage.getItem('tenor-viol-neckh');if(f>0.03&&f<0.9)st.neckFrac=f;
-  const z=+localStorage.getItem('tenor-viol-zoom');if(z>=0.6&&z<=1.6)st.zoom=z;}catch(e){}
+  const z=+localStorage.getItem('tenor-viol-zoom');if(z>=0.6&&z<=1.6)st.zoom=z;
+  st.follow=localStorage.getItem('tenor-viol-follow')!=='0';}catch(e){}
 st.sv=st.necks.includes('tenor')?'tenor':st.necks[0];
 const keep=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,typeof v==='string'?v:JSON.stringify(v));}catch(e){}};
 
@@ -437,12 +444,20 @@ function neckSvg(v,W,H,compact,per){
   VIOLS[v].open.forEach((o,i)=>{const y=top+i*gap;
     s+=`<line x1="${nutX}" x2="${xEnd.toFixed(1)}" y1="${y}" y2="${y}" stroke="#e8dcc0" stroke-width="${1+i*.45}"/>`;
     s+=`<text x="12" y="${y+5}" fill="#d9a441" font-size="15" style="cursor:pointer" data-str="${i}">${i+1} · ${strName(o)}</text>`;});
-  // a dot for every note
+  // a dot for every note; the ones that light up are drawn last, bigger and ringed, and while the music plays they
+  // glow and the other dots step back
+  const dim=!!playing,lit=[];
   positions(v).forEach(p=>{
     if(!allowed(p.m))return;
-    const hl=st.hl[p.k],fill=hl||(NAT.includes(pc(p.m))?'#f3e8d0':'#b9a27d'),lab=spell(p.m).pcname,x=X(p.f),y=top+p.s*gap;
-    s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"><circle cx="${x}" cy="${y}" r="15" fill="${fill}" stroke="#2a1a0e" stroke-width="1.5"/>`+
-       ((st.labels&&!st.hideLabels)||hl?`<text x="${x}" y="${y+5}" text-anchor="middle" font-size="${lab.length>1?12:15}" fill="#1a1410" font-family="Georgia">${lab}</text>`:'')+'</g>';
+    const hl=st.hl[p.k],lab=spell(p.m).pcname,x=X(p.f),y=top+p.s*gap;
+    if(hl){lit.push({p,hl,lab,x,y});return;}
+    s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"${dim?' opacity=".4"':''}><circle cx="${x}" cy="${y}" r="15" fill="${NAT.includes(pc(p.m))?'#f3e8d0':'#b9a27d'}" stroke="#2a1a0e" stroke-width="1.5"/>`+
+       (st.labels&&!st.hideLabels?`<text x="${x}" y="${y+5}" text-anchor="middle" font-size="${lab.length>1?12:15}" fill="#1a1410" font-family="Georgia">${lab}</text>`:'')+'</g>';
+  });
+  lit.forEach(({p,hl,lab,x,y})=>{
+    s+=`<g class="dot lit" data-s="${p.s}" data-f="${p.f}" data-b="${st.pulse[p.k]||0}">`+(dim?`<circle cx="${x}" cy="${y}" r="28" fill="${hl}" opacity=".35"/>`:'')+
+       `<circle class="main" cx="${x}" cy="${y}" r="19" fill="${hl}" stroke="#fff6dc" stroke-width="3"/>`+
+       `<text x="${x}" y="${y+5.5}" text-anchor="middle" font-size="${lab.length>1?14:17}" font-weight="bold" fill="#1a1410" font-family="Georgia">${lab}</text></g>`;
   });
   for(let n=0;n<=st.frets;n++)s+=`<text x="${X(n)}" y="${H-12}" text-anchor="middle" fill="#a8967c" font-size="13">${n===0?'open':n}</text>`;
   return s+'</svg>';
@@ -668,7 +683,7 @@ function neckOf(pi){
   const v=violOf(sc.parts[pi]);if(st.necks.includes(v))return v;
   return pi===sc.pi?st.necks.find(n=>!sc.parts.some(p=>violOf(p)===n))||null:null;
 }
-const sc={ts:[4,4],bpm:60,sel:-1,cur:0,bi:3,dots:0,parts:[newPart('Tenor viol',null,'viola',0)],pi:0,reverb:0.3,full:false};
+const sc={ts:[4,4],bpm:60,sel:-1,cur:0,bi:3,dots:0,parts:[newPart('Tenor viol',null,'viola',0)],pi:0,reverb:0.3,full:false,neckPart:0};   // neckPart: the part the neck shows while playing (-1: every part)
 try{sc.full=localStorage.getItem('tenor-viol-full')==='1';}catch(e){}   // all the parts' staves together (remembered)
 Object.defineProperty(sc,'items',{get(){return sc.parts[sc.pi].items;},set(v){sc.parts[sc.pi].items=v;}});
 Object.defineProperty(sc,'hist',{get(){return sc.parts[sc.pi].hist;},set(v){sc.parts[sc.pi].hist=v;}});
@@ -747,7 +762,7 @@ $('exGo').onclick=()=>{
   if(sc.parts.some(p=>p.items.length)&&!confirm('Replace the score with this exercise?'))return;
   stopPlay();
   const ex=makeExercise();
-  sc.parts=[newPart('Tenor viol',null,'viola',0)];sc.pi=0;sc.items=ex.items;sc.sel=-1;sc.cur=ex.items.length;
+  sc.parts=[newPart('Tenor viol',null,'viola',0)];sc.pi=0;sc.neckPart=0;sc.items=ex.items;sc.sel=-1;sc.cur=ex.items.length;
   st.key=ex.key;$('key').value=ex.key;refresh();
   sc.ts=[4,4];$('tsn').value=4;$('tsd').value=4;$('title').value=ex.title;$('fromSel').value='start';$('fromBar').value='';
   buildParts();drawRecording();openFold('pPrac',false);$('scoreBox').scrollTop=0;
@@ -757,6 +772,10 @@ function buildPartPick(){
   const P=$('partSel');P.innerHTML='';sc.parts.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=p.name;P.append(o);});
   P.value=sc.pi;$('partPick').style.display=$('fullBtn').style.display=sc.parts.length>1?'':'none';
   $('fullBtn').classList.toggle('on',!!sc.full);
+  // Neck shows: one part, or every part (each on its viol's neck)
+  const N=$('neckSel');N.innerHTML='';sc.parts.concat([{name:'Every part'}]).forEach((p,i)=>{const o=document.createElement('option');o.value=i<sc.parts.length?i:-1;o.textContent=p.name;N.append(o);});
+  if(sc.neckPart>=sc.parts.length)sc.neckPart=sc.pi;
+  N.value=sc.neckPart;$('neckPick').style.display=sc.parts.length>1?'':'none';
 }
 function usePart(i){
   if(i===sc.pi)return;
@@ -777,8 +796,13 @@ function addItem(m){snap();sc.items.splice(sc.cur,0,{m,d:durT()});sc.cur++;sc.se
   stat(`${m==null?'Rest':spell(m,keyAt(sc.cur-1)).name} added (${BASES[sc.bi][3].toLowerCase()}${'·'.repeat(sc.dots)}).`);}
 function setDur(bi){sc.bi=bi;if(sc.sel>=0){snap();sc.items[sc.sel].d=durT();}buildPalette();drawRecording();}
 function setDots(n){sc.dots=n;if(sc.sel>=0){snap();sc.items[sc.sel].d=durT();}buildPalette();drawRecording();}
-// a note of the part on the screen, on the neck of its viol
-function lightNeck(m,v=neckOf(sc.pi)||st.necks[0]){st.hl={};positions(v).filter(p=>p.m===m).forEach(p=>st.hl[p.k]='#d9a441');drawNecks();}
+// a note of the part you work on, on its viol's neck (not when Neck shows is set to another part)
+function lightNeck(m){
+  st.hl={};
+  const v=sc.parts.length>1&&sc.neckPart>=0?(sc.neckPart===sc.pi?neckFor(sc.pi):null):neckOf(sc.pi)||st.necks[0];
+  if(v)positions(v).filter(p=>p.m===m).forEach(p=>st.hl[p.k]='#d9a441');
+  drawNecks();
+}
 function selectItem(i){
   if(sc.sel===i){sc.sel=-1;sc.cur=sc.items.length;drawRecording();return;}
   setSel(i);
@@ -1116,21 +1140,27 @@ let playing=null;
 // While the music plays the page follows it line by line. As soon as you scroll yourself it stops following and
 // leaves the page where you put it; scroll back to the playing line and it follows again.
 let lastUserScroll=0;
-const userScrolled=()=>{lastUserScroll=performance.now();if(playing)playing.follow=false;};
+const userScrolled=e=>{
+  if(e&&e.target&&e.target.closest&&!e.target.closest('#scoreBox'))return;   // (the necks, menus and the bar above the score do not count)
+  lastUserScroll=performance.now();if(playing&&playing.follow){playing.follow=false;followUI();}
+};
 addEventListener('wheel',userScrolled,{passive:true});
 addEventListener('touchmove',userScrolled,{passive:true});
 addEventListener('keydown',e=>{if(['PageUp','PageDown','Home','End',' '].includes(e.key)&&!/INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target.tagName))userScrolled();});
-addEventListener('mousedown',e=>{if(e.clientX>=document.documentElement.clientWidth||e.clientY>=document.documentElement.clientHeight)userScrolled();});   // the scroll bar
+$('scoreBox').addEventListener('mousedown',e=>{if(e.target===$('scoreBox')&&e.offsetX>=$('scoreBox').clientWidth)userScrolled();});   // its scroll bar
 $('scoreBox').addEventListener('scroll',()=>{if(performance.now()-lastUserScroll<1200)lastUserScroll=performance.now();},{passive:true});   // a flick keeps gliding
-// The notes that are sounding light up: in the score (orange) for the part on the screen, and on the necks for every
-// part whose viol's neck is shown (the part on the screen in gold, a second part on the same neck in blue).
-const PLAY_COL=['#d9a441','#8fc1e8','#a6d189'];
+// The notes that are sounding light up: in the score (orange), and on the neck for the part chosen under Neck shows, or
+// for every part on its own viol's neck (orange, then blue and green for more parts on one neck).
+const PLAY_COL=['#ff8a1c','#5fb0ff','#6fd17f'];
+// where the chosen part lights up: its viol's neck, or (when that one is hidden) the tenor viol's neck or the first shown
+const neckFor=pi=>{const v=violOf(sc.parts[pi]);return st.necks.includes(v)?v:quizViol();};
 function paintPlay(){
-  const p=playing;if(!p)return;st.hl={};const count={};
-  sc.parts.map((_,i)=>i).sort((a,b)=>(b===sc.pi)-(a===sc.pi)).forEach(pi=>{
-    const v=neckOf(pi);if(!v)return;
+  const p=playing;if(!p)return;st.hl={};st.pulse={};const count={};
+  const one=sc.neckPart>=0&&sc.neckPart<sc.parts.length;
+  (one?[sc.neckPart]:sc.parts.map((_,i)=>i).sort((a,b)=>(b===sc.pi)-(a===sc.pi))).forEach(pi=>{
+    const v=one?neckFor(pi):neckOf(pi);if(!v)return;
     const k=count[v]||0,c=PLAY_COL[Math.min(k,PLAY_COL.length-1)],m=p.now[pi];count[v]=k+1;
-    if(m!=null)positions(v).forEach(q=>{if(q.m===m&&!st.hl[q.k])st.hl[q.k]=c;});
+    if(m!=null)positions(v).forEach(q=>{if(q.m===m&&!st.hl[q.k]){st.hl[q.k]=c;st.pulse[q.k]=p.beat[pi];}});
   });
   drawNecks();
 }
@@ -1144,9 +1174,9 @@ function lightPlaying(pi,i){
   paintNote(i,'#e08a00',map);
   if(pi!==sc.pi)return;   // the score follows the part you are working on
   const e=(map.get(i)||[])[0];if(!e)return;
-  const line=e.closest('svg')||e,r=line.getBoundingClientRect(),box=$('scoreBox').getBoundingClientRect(),inView=r.top>=box.top&&r.bottom<=box.bottom;
-  if(!playing.follow&&inView&&performance.now()-lastUserScroll>1500)playing.follow=true;   // you came back to the music
-  if(playing.follow&&!inView)line.scrollIntoView({block:'nearest'});
+  const line=e.closest('svg')||e,r=line.getBoundingClientRect(),box=$('scoreBox').getBoundingClientRect(),inView=r.top>=box.top-2&&r.bottom<=box.bottom+2;
+  if(!p.follow&&st.follow&&inView&&performance.now()-lastUserScroll>1500){p.follow=true;followUI();}   // you came back to the music
+  if(p.follow&&!inView)line.scrollIntoView({block:'start',behavior:'smooth'});   // the line that plays goes to the top, so you see what comes next
 }
 // mute and solo: with any part on solo only the solo parts sound; otherwise every part that is not muted
 const audible=p=>sc.parts.some(q=>q.solo)?p.solo:!p.mute;
@@ -1247,7 +1277,7 @@ function stopPlay(){
   clearInterval(playing.loop);playing.timers.forEach(clearTimeout);
   const out=playing.out;try{out.gain.cancelScheduledValues(0);out.gain.setTargetAtTime(0,ac.currentTime,0.03);setTimeout(()=>out.disconnect(),400);}catch(e){}
   for(const k in playing.lit){const pi=+k,i=playing.lit[k],map=elsOf(pi);if(map)paintNote(i,pi===sc.pi&&i===sc.sel?'#1f5fbf':null,map);}
-  playing=null;$('playBtn').textContent='▶ Play';st.hl={};drawNecks();
+  playing=null;$('playBtn').textContent='▶ Play';st.hl={};st.pulse={};drawNecks();followUI();
 }
 function playScore(){
   if(playing){stopPlay();return;}
@@ -1256,17 +1286,17 @@ function playScore(){
   const buses=sc.parts.map(p=>{const g=c.createGain(),pan=c.createStereoPanner();g.gain.value=audible(p)?p.vol:0;pan.pan.value=p.pan;g.connect(pan).connect(out);return {g,pan};});
   const from=startTick();
   const tl=buildTimeline(from),per=60/sc.bpm/TPQ,t0=c.currentTime+0.15;
-  playing={ev:tl.ev,k:0,t0,out,buses,timers:[],lit:{},follow:true,now:sc.parts.map(()=>null)};
+  playing={ev:tl.ev,k:0,t0,out,buses,timers:[],lit:{},follow:st.follow,now:sc.parts.map(()=>null),beat:sc.parts.map(()=>0)};
   // notes are set up a little ahead of time, a few at a time, so a long piece starts at once (and the iPad copes)
   const pump=()=>{const p=playing;if(!p)return;const now=ac.currentTime;
     while(p.k<p.ev.length&&p.t0+p.ev[p.k].at*per<now+1.2){
       const e=p.ev[p.k++],at=p.t0+e.at*per;
       if(e.m!=null)voice(e.m,at,e.d*per*0.97,sc.parts[e.pi].sound,p.buses[e.pi].g);
-      p.timers.push(setTimeout(()=>{if(playing!==p)return;p.now[e.pi]=e.m;lightPlaying(e.pi,e.i);paintPlaySoon();},Math.max(0,(at-ac.currentTime)*1000)));
+      p.timers.push(setTimeout(()=>{if(playing!==p)return;p.now[e.pi]=e.m;if(e.m!=null)p.beat[e.pi]++;lightPlaying(e.pi,e.i);paintPlaySoon();},Math.max(0,(at-ac.currentTime)*1000)));
     }};
   pump();playing.loop=setInterval(pump,250);
   playing.timers.push(setTimeout(stopPlay,(t0+tl.total*per-c.currentTime)*1000+500));
-  $('playBtn').textContent='■ Stop';
+  $('playBtn').textContent='■ Stop';followUI();
   const n=sc.parts.filter(audible).length;
   stat((sc.sel>=0?'Playing from note '+(sc.sel+1)+'. ':'')+(sc.parts.length>1?`${n} of ${sc.parts.length} parts sounding. `:'')+(sc.sel>=0?'Deselect the note (click it again) to play from the start.':''));
 }
@@ -1571,6 +1601,7 @@ function addScanned(list){
   if(fresh)sc.parts=made.map(m=>Object.assign(newPart(m.name,m.clef,m.sound,m.pan),{mainClef:m.mainClef,items:m.items}));
   else made.forEach((m,i)=>{const p=sc.parts[i]||(sc.parts[i]=newPart(m.name,m.clef,m.sound,m.pan));p.hist.push(JSON.stringify(p.items));p.items=p.items.concat(m.items);});
   const ti=sc.parts.findIndex(p=>/Tenor/.test(p.name));sc.pi=ti>=0?ti:0;sc.sel=-1;sc.cur=sc.items.length;
+  if(fresh)sc.neckPart=sc.pi;   // the neck shows the tenor part
   if(fresh){
     const f=pages.flatMap(pg=>pg.staves).find(s=>s.elems.length);
     const k=f?(f.keyFinal!=null?f.keyFinal:f.fifths):null;
@@ -1623,7 +1654,7 @@ async function loadFile(f){
       if(Array.isArray(d.parts)&&d.parts.length){   // a score with parts
         stopPlay();
         sc.parts=d.parts.map(p=>Object.assign(newPart(String(p.name||'Part'),p.clef||null,INST[p.sound]?p.sound:'viola',+p.pan||0,p.viol),{vol:p.vol!=null?+p.vol:0.8,mute:!!p.mute,solo:!!p.solo,mainClef:p.mainClef||null,items:(p.items||[]).filter(okItem)}));
-        sc.pi=Math.min(sc.parts.length-1,Math.max(0,d.part|0));if(d.reverb!=null)setReverb(+d.reverb);
+        sc.pi=Math.min(sc.parts.length-1,Math.max(0,d.part|0));sc.neckPart=d.neckPart===-1?-1:d.neckPart>=0&&d.neckPart<sc.parts.length?d.neckPart|0:sc.pi;if(d.reverb!=null)setReverb(+d.reverb);
         items=sc.items.slice();sc.items=[];
       }
       else if(Array.isArray(d.items))items=d.items.filter(okItem);
@@ -1663,7 +1694,7 @@ $('upBtn').onclick=()=>setDur((sc.bi-1+BASES.length)%BASES.length);
 $('downBtn').onclick=()=>setDur((sc.bi+1)%BASES.length);
 $('endBtn').onclick=()=>{sc.sel=-1;sc.cur=sc.items.length;drawRecording();stat('Adding notes at the end.');};
 $('clearBtn').onclick=()=>{if(rec.on)stopRec();stopPlay();
-  if(sc.parts.length>1){sc.parts=[newPart('Tenor viol',null,'viola',0)];sc.pi=0;sc.sel=-1;sc.cur=0;buildParts();drawRecording();stat('Cleared all parts.');return;}
+  if(sc.parts.length>1){sc.parts=[newPart('Tenor viol',null,'viola',0)];sc.pi=0;sc.neckPart=0;sc.sel=-1;sc.cur=0;buildParts();drawRecording();stat('Cleared all parts.');return;}
   snap();sc.items=[];sc.sel=-1;sc.cur=0;drawRecording();buildParts();stat('Cleared (Undo brings it back).');};
 $('playBtn').onclick=playScore;
 function openFold(id,open){
@@ -1673,6 +1704,26 @@ function openFold(id,open){
 }
 document.querySelectorAll('.fold').forEach(b=>b.onclick=()=>openFold(b.dataset.p,!$(b.dataset.p).classList.contains('open')));
 $('partSel').onchange=()=>usePart(+$('partSel').value);
+$('neckSel').onchange=()=>{sc.neckPart=+$('neckSel').value;st.hl={};playing?paintPlay():drawNecks();
+  stat(sc.neckPart<0?'Every part lights up on the neck of its viol.':`Only the ${sc.parts[sc.neckPart].name} part lights up on the neck.`);};
+// Follow score: the score keeps the music that is playing in view. Scrolling the score by hand pauses it (the button goes
+// dark); press it to go back to where the music is and follow it again, or to stop following.
+function following(){return playing?playing.follow:st.follow;}
+function followUI(){$('followBtn').classList.toggle('on',!!following());}
+function goToPlaying(){
+  const p=playing;if(!p)return;
+  let i=p.lit[sc.pi],map=elsOf(sc.pi);
+  if(i==null)for(const k in p.lit)if(elsOf(+k)){i=p.lit[k];map=elsOf(+k);break;}   // the part you work on has not played yet
+  const e=i!=null&&map&&(map.get(i)||[])[0];
+  if(e)(e.closest('svg')||e).scrollIntoView({block:'start',behavior:'smooth'});
+}
+$('followBtn').onclick=()=>{
+  if(following()){st.follow=false;if(playing)playing.follow=false;}
+  else{st.follow=true;if(playing){playing.follow=true;goToPlaying();}}
+  keep('tenor-viol-follow',st.follow?null:'0');followUI();
+  stat(st.follow?'The score follows the music.':'The score stays where you put it. Press Follow score to go back to the music.');
+};
+followUI();
 $('fullBtn').onclick=()=>{sc.full=!sc.full;keep('tenor-viol-full',sc.full?'1':null);buildPartPick();keepScroll(drawRecording);
   stat(sc.full?`Every part's staff is shown. The ${part().name} part (in gold) is the one you work on: click a note or a name to change it.`:`Showing the ${part().name} part only.`);};
 // the necks shown
@@ -1697,7 +1748,7 @@ $('impFile').onchange=()=>{const f=$('impFile').files[0];if(f)loadFile(f);$('imp
 $('pdfClose').onclick=()=>{$('pdfref').classList.remove('open');};
 $('expBtn').onclick=()=>{
   if(rec.on)stopRec();
-  const data={app:'tenor-viol-trainer',version:3,title:$('title').value,key:st.key,clef:st.clef,bpm:sc.bpm,ts:sc.ts,reverb:sc.reverb,part:sc.pi,
+  const data={app:'tenor-viol-trainer',version:3,title:$('title').value,key:st.key,clef:st.clef,bpm:sc.bpm,ts:sc.ts,reverb:sc.reverb,part:sc.pi,neckPart:sc.neckPart,
     parts:sc.parts.map(p=>({name:p.name,clef:p.clef,mainClef:p.mainClef||null,sound:p.sound,viol:violOf(p),vol:p.vol,pan:p.pan,mute:p.mute,solo:p.solo,items:p.items}))};
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,1)],{type:'application/json'}));
