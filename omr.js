@@ -169,14 +169,36 @@ function analyzeBitmap(imgData, opts){
       }
       comps.push({ minx, maxx, miny, maxy, w: maxx - minx + 1, h: maxy - miny + 1, area, pix });
     }
-    const clef = comps.filter(c => c.h > 4 * p).sort((a, b) => a.minx - b.minx)[0];
+    // Which clef? A treble clef reaches well above and below the staff. A C clef is a thick bar the height of the
+    // staff (plus a thin bar and two curls) and its middle marks the C line: the middle line for the alto clef, the
+    // line above for the tenor clef. A bass clef is a broad shape hanging from the top line, with two dots.
+    // (The bracket or line that joins the staves of a full score is thin or much taller, and is ignored.)
+    const near = comps.filter(c => c.minx < st.left + 3.5 * p && c.minx >= st.left + 0.25 * p && c.w >= 0.25 * p);   // (a bracket and its hooks start right at the staff's edge)
+    const gClef = near.find(c => c.h >= 5.2 * p && c.w >= 1.0 * p && c.w <= 3.6 * p);
+    const cBar = near.find(c => c.h >= 3.6 * p && c.h <= 5.0 * p && c.w <= 0.9 * p);
+    const fClef = near.find(c => c.h >= 2.0 * p && c.h < 3.6 * p && c.w >= 1.0 * p && c.miny - st.top < 0.6 * p);
+    let clef = gClef || cBar || fClef || null;
+    if (gClef) st.clefType = 'treble';
+    else if (cBar) { const line = Math.round(((cBar.miny + cBar.maxy) / 2 - st.top) / p); st.clefType = ['baritoneC', 'tenor', 'alto', 'mezzo', 'soprano'][line] || null; }
+    else if (fClef) st.clefType = 'bass';
+    else st.clefType = null;
+    if (!clef) clef = comps.filter(c => c.h > 4 * p && c.h < 8 * p && c.w >= 0.25 * p).sort((a, b) => a.minx - b.minx)[0];
     // a C clef is a tall bar plus two curls that come out as separate shapes; they belong to the clef too
     // (otherwise the two curls look like the stacked numbers of a time signature)
     let clefRight = clef ? clef.maxx : 0;
     if (clef) for (const c of comps) if (c.minx < clef.minx + 2.7 * p && c.maxx < clef.minx + 3.2 * p && c.maxx > clefRight) clefRight = c.maxx;
     const zone = clef ? clefRight + 0.15 * p : st.left + 2.8 * p;
     st.clefRight = clef ? clefRight : null;
-    const cands = comps.filter(c => c.minx >= zone && c.h >= 2.15 * p && c.h <= 3.4 * p && c.w >= 0.35 * p && c.w <= 1.05 * p).sort((a, b) => a.minx - b.minx);
+    // In some editions a flat comes apart into its stem and its round part (thin joins are dropped above):
+    // put pieces that sit side by side and overlap in height back together into one sign.
+    const signs = [];
+    for (const c of comps.filter(c => c.minx >= zone - 0.2 * p).sort((a, b) => a.minx - b.minx)) {
+      const g = signs.find(s => Math.min(s.maxx, c.maxx) - Math.max(s.minx, c.minx) >= -0.25 * p && Math.min(s.maxy, c.maxy) - Math.max(s.miny, c.miny) >= -0.1 * p &&
+        Math.max(s.maxx, c.maxx) - Math.min(s.minx, c.minx) <= 1.05 * p && Math.max(s.maxy, c.maxy) - Math.min(s.miny, c.miny) <= 3.4 * p);
+      if (g) { g.minx = Math.min(g.minx, c.minx); g.maxx = Math.max(g.maxx, c.maxx); g.miny = Math.min(g.miny, c.miny); g.maxy = Math.max(g.maxy, c.maxy); g.pix = g.pix.concat(c.pix); g.area += c.area; g.w = g.maxx - g.minx + 1; g.h = g.maxy - g.miny + 1; }
+      else signs.push({ ...c, pix: c.pix.slice() });
+    }
+    const cands = signs.filter(c => c.minx >= zone && c.h >= 2.15 * p && c.h <= 3.4 * p && c.w >= 0.35 * p && c.w <= 1.05 * p).sort((a, b) => a.minx - b.minx);
     let lastX = -1; const keyAccs = [];
     for (const c of cands) {
       if (lastX >= 0 && c.minx - lastX > 1.4 * p) break;                       // past the key signature
@@ -196,8 +218,28 @@ function analyzeBitmap(imgData, opts){
       const cs = comps.filter(c => c.minx >= afterKey - 0.3 * p && c.minx < afterKey + 4.5 * p && c.h <= 2.8 * p && c.h >= 0.8 * p);
       let tsx = null;
       for (const a of cs) for (const b of cs) if (a !== b && a.miny < b.miny && Math.min(a.maxx, b.maxx) - Math.max(a.minx, b.minx) > 0.4 * Math.min(a.w, b.w) && b.miny - a.maxy < 0.8 * p) { ms = Math.max(ms, a.maxx, b.maxx); tsx = [Math.min(tsx ? tsx[0] : 1e9, a.minx, b.minx), Math.max(tsx ? tsx[1] : 0, a.maxx, b.maxx)]; }
-      st.musicStart = ms + 0.4 * p;
       st.tsBox = tsx;            // where the time signature's two numbers are, if there is one
+      st.tsSym = null;
+      if (!tsx) {
+        // common time (C) or cut time (C with a stroke through it): one round sign on the middle line, open on its right
+        const c1 = comps.find(c => c.minx >= afterKey - 0.3 * p && c.minx < afterKey + 4.5 * p && c.h >= 1.5 * p && c.h <= 3.4 * p &&
+          c.w >= 0.8 * p && c.w <= 1.9 * p && Math.abs((c.miny + c.maxy) / 2 - (st.top + 2 * p)) <= 0.5 * p);
+        if (c1) {
+          // longest unbroken upright run in the left, middle and right of the sign: a C has a tall curved back on the
+          // left and is open on the right; a cut C also has a stroke through the middle; a rest's zigzag has neither
+          const g = new Uint8Array(c1.w * c1.h);
+          for (const q of c1.pix) { const gx = q % W - c1.minx, gy = Math.floor(q / W) - c1.miny; if (gx >= 0 && gx < c1.w && gy >= 0 && gy < c1.h) g[gy * c1.w + gx] = 1; }
+          const run = (a, b) => { let best = 0; for (let gx = Math.floor(a * c1.w); gx < Math.min(c1.w, Math.ceil(b * c1.w)); gx++) { let r = 0; for (let gy = 0; gy < c1.h; gy++) { if (g[gy * c1.w + gx]) { r++; if (r > best) best = r; } else r = 0; } } return best / c1.h; };
+          const L = run(0, 0.3), R = run(0.75, 1);
+          // a C is the same upside down (a rest's zigzag is not)
+          let both = 0, either = 0;
+          for (let gy = 0; gy < c1.h; gy++) for (let gx = 0; gx < c1.w; gx++) { const a = g[gy * c1.w + gx], b = g[(c1.h - 1 - gy) * c1.w + gx]; if (a && b) both++; if (a || b) either++; }
+          const mirror = either ? both / either : 0;
+          // (C and cut C give the same length of bar; it only counts as cut time when its stroke sticks out well past the C)
+          if (L >= 0.6 && R <= 0.5 && mirror >= 0.55) { st.tsSym = c1.h >= 2.6 * p ? [2, 2] : [4, 4]; ms = Math.max(ms, c1.maxx); }
+        }
+      }
+      st.musicStart = ms + 0.4 * p;
     }
     if (opts.debug) st.keyDebug = { zone: Math.round(zone), clef: clef && { minx: clef.minx, maxx: clef.maxx, h: clef.h }, comps: comps.filter(c => c.minx >= zone - p && c.minx < zone + 8 * p).map(c => ({ x: c.minx, y: c.miny, w: +(c.w / p).toFixed(2), h: +(c.h / p).toFixed(2) })) };
   }
@@ -281,8 +323,14 @@ function analyzeBitmap(imgData, opts){
       for (const q of pix) { const k = Math.floor(q / W) - miny, qx = q % W; if (qx < lx[k]) lx[k] = qx; if (qx > rx[k]) rx[k] = qx; }
       let mk = 0; for (let k = 0; k < h; k++) if (rx[k] - lx[k] > rx[mk] - lx[mk]) mk = k;
       const k1 = Math.round(h * 0.15), k2 = Math.min(h - 1, Math.round(h * 0.85)), need = Math.max(1, 0.05 * U);
-      const inL = Math.min(lx[k1] - lx[mk], lx[k2] - lx[mk]), inR = Math.min(rx[mk] - rx[k1], rx[mk] - rx[k2]);
-      if (!(inL >= need && inR >= need)) continue;
+      // (a slanted oval curves in more at one end on each side, so add top and bottom together)
+      const L1 = lx[k1] - lx[mk], L2 = lx[k2] - lx[mk], R1 = rx[mk] - rx[k1], R2 = rx[mk] - rx[k2];
+      if (!(L1 + L2 >= 2 * need && R1 + R2 >= 2 * need)) continue;
+      // and a notehead's hollow curves in about as much on one side as on the other (the gap beside a sharp has one straight side)
+      if (Math.abs((L1 + L2) - (R1 + R2)) > Math.max(3, 0.35 * (L1 + L2 + R1 + R2))) continue;
+      // and it narrows at its top and bottom, where the gap beside a sharp is cut off flat by the staff lines
+      const wMax = rx[mk] - lx[mk] + 1;
+      if (rx[0] - lx[0] + 1 > 0.6 * wMax || rx[h - 1] - lx[h - 1] + 1 > 0.6 * wMax) continue;
       for (const q of pix) { holes[q] = 1; filled[q] = 1; }
     }
   }
@@ -385,12 +433,15 @@ function analyzeBitmap(imgData, opts){
       for (let y = b.miny; y <= b.maxy; y++) for (let x = b.minx; x <= b.maxx; x++) { const q = y*W + x; if (holes[q]) { hc++; hx += x; if (x < hmin) hmin = x; if (x > hmax) hmax = x; } if (core[q]) { if (x < mx) cl++; else cr++; } }
       const raw = ((b.miny + b.maxy) / 2 - st.top) / (p / 2), step = Math.round(raw);
       const even = cl > 0 && cr > 0 && cl / cr >= 0.7 && cl / cr <= 1.43;          // a breve is the same on both sides
+      let holeParts = 0;                                                           // ...and has one hollow middle
+      { const seenH = new Set(); for (let y = b.miny; y <= b.maxy; y++) for (let x = b.minx; x <= b.maxx; x++) { const q0 = y*W + x; if (!holes[q0] || seenH.has(q0)) continue; holeParts++; const stk = [q0]; seenH.add(q0);
+          while (stk.length) { const q = stk.pop(), qx = q % W, qy = (q - qx) / W; for (const n of [q - 1, q + 1, q - W, q + W]) { const nx = n % W, ny = (n - nx) / W; if (nx >= b.minx && nx <= b.maxx && ny >= b.miny && ny <= b.maxy && holes[n] && !seenH.has(n)) { seenH.add(n); stk.push(n); } } } } }
       // square breves are tall; round ones have upright strokes at both sides (a tied semibreve has neither)
       const yc0 = (b.miny + b.maxy) / 2;
       const side = (xa, xb) => { let rows = 0, n = 0; for (let y = Math.round(yc0 - 0.8 * p); y <= Math.round(yc0 + 0.8 * p); y++) { n++; for (let x = Math.max(0, xa); x <= Math.min(W - 1, xb); x++) if (filled[y*W + x]) { rows++; break; } } return n ? rows / n : 0; };
       const sw = Math.max(2, Math.round(0.15 * w));
       const shaped = h >= 1.3 * p || (side(b.minx - 3, b.minx + sw) >= 0.9 && side(b.maxx - sw, b.maxx + 3) >= 0.9);
-      if (even && shaped && hc >= 0.06 * w * h && hmax - hmin + 1 >= 0.45 * w && Math.abs(hx / hc - mx) <= 0.15 * w && Math.abs(raw - step) <= 0.8 && step >= -6 && step <= 13) {
+      if (even && shaped && holeParts === 1 && hc >= 0.06 * w * h && hmax - hmin + 1 >= 0.45 * w && Math.abs(hx / hc - mx) <= 0.15 * w && Math.abs(raw - step) <= 0.8 && step >= -6 && step <= 13) {
         notes.push({ x: (b.minx + b.maxx) / 2, y: st.top + step * p / 2, step, p, stemUp: null, staff: staves.indexOf(st), area: b.area, w, breve: true });
         continue;
       }
@@ -421,6 +472,9 @@ function analyzeBitmap(imgData, opts){
       const vx = Math.round(hd.x); let va = Math.round(hd.y), vb = va;
       if (filled[va*W + vx]) { while (va > 0 && filled[(va - 1)*W + vx]) va--; while (vb < H - 1 && filled[(vb + 1)*W + vx]) vb++; }
       if (vb - va + 1 < 0.66 * p) { R(b, 'thin'); continue; }
+      { const bx0 = b.minx + 1, bx1 = b.maxx - 1, by0 = b.miny + 1, by1 = b.maxy - 1;
+        const corners = [[bx0, by0], [bx1, by0], [bx0, by1], [bx1, by1]].filter(([cx, cy]) => filled[cy * W + cx]).length;
+        if (corners >= 3 && b.maxy - b.miny + 1 <= 0.8 * p) { R(b, 'block'); continue; } }
       const ef = ellipseFill(hd.x, hd.y, p);
       if (ef < 0.82) { R(b, 'fill', { ef: +ef.toFixed(2), step }); continue; }      // not a solid oval: rest, accidental, text
       if (opts.ledger && (step <= -2 || step >= 10)) {
@@ -460,7 +514,7 @@ function median(a){ const s = [...a].sort((x, y) => x - y); const m = s.length >
 /* ================================================================
    Rhythm, rests, bar lines and accidentals, built on analyzeBitmap
    ================================================================ */
-const OMR_TOPDIA = { alto: 32, tenor: 30, treble: 38, treble8: 31, bass: 26 };   // diatonic index of the top staff line
+const OMR_TOPDIA = { alto: 32, tenor: 30, treble: 38, treble8: 31, bass: 26, soprano: 36, mezzo: 34, baritoneC: 28 };   // diatonic index of the top staff line
 const OMR_LET = 'CDEFGAB', OMR_BASE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const OMR_SHARPS = 'FCGDAEB', OMR_FLATS = 'BEADGCF';
 
@@ -475,7 +529,7 @@ function omrReadPage(imgData) {
   // a dot is small and round: nothing dark straight above, below or beside it (a short upright mark fails)
   const hasDot = (x, y, p) => { for (let dx = 0.8; dx <= 1.75; dx += 0.1) { const cx = x + dx * p, r = 0.34 * p; if (discFill(cx, y, 0.16 * p) >= 0.8 && ringFill(cx, y, 0.3 * p, 0.46 * p) <= 0.22 && !dark(Math.round(cx), Math.round(y - r)) && !dark(Math.round(cx), Math.round(y + r)) && !dark(Math.round(cx - r), Math.round(y)) && !dark(Math.round(cx + r), Math.round(y))) return true; } return false; };
   const runLen = (x, y0, dir, max) => { let len = 0, last = 0, gap = 0, y = y0; while (len < max) { y += dir; len++; if (y < 0 || y >= H) break; if (filled[y * W + x]) { last = len; gap = 0; } else if (++gap > Math.max(2, LT)) break; } return last; };
-  const bandCount = (x, ya, yb, p) => { const a = Math.round(Math.min(ya, yb)), b = Math.round(Math.max(ya, yb)); let runs = 0, run = 0; const lo = Math.max(2, 0.16 * p), hi = 0.9 * p; for (let y = a; y <= b + 1; y++) { if (y <= b && dark(Math.round(x), y)) run++; else { if (run >= lo && run <= hi) runs++; run = 0; } } return runs; };
+  const bandCount = (x, ya, yb, p) => { const a = Math.round(Math.min(ya, yb)), b = Math.round(Math.max(ya, yb)), xi = Math.round(x); let runs = 0, run = 0; const lo = Math.max(2, 0.16 * p), hi = 0.9 * p; for (let y = a; y <= b + 1; y++) { if (y <= b && xi >= 0 && xi < W && y >= 0 && y < H && clean[y * W + xi]) run++; else { if (run >= lo && run <= hi) runs++; run = 0; } } return runs; };
   const med3 = a => a.sort((x, y) => x - y)[1];
 
   // ---------- accidentals (sharp, flat, natural) as separate shapes left of noteheads ----------
@@ -503,7 +557,12 @@ function omrReadPage(imgData) {
     for (const c of comps) {
       if (c.h < 1.9 * p || c.h > 3.7 * p || c.w < 0.3 * p || c.w > 1.35 * p) continue;
       if (notes.some(n => n.x >= c.minx - 0.25 * p && n.x <= c.maxx + 0.25 * p && n.y >= c.miny - 0.25 * p && n.y <= c.maxy + 0.25 * p)) continue;
-      const col = new Uint16Array(c.w); for (const q of c.pix) col[(q % c.bw) + c.xa - c.minx]++;
+      // the longest unbroken upright run in each column: accidentals are made of straight upright strokes,
+      // while a crotchet rest's zigzag only crosses a column in short pieces
+      const grid = new Uint8Array(c.w * c.h);
+      for (const q of c.pix) { const gx = (q % c.bw) + c.xa - c.minx, gy = Math.floor(q / c.bw) + c.ya - c.miny; if (gx >= 0 && gx < c.w && gy >= 0 && gy < c.h) grid[gy * c.w + gx] = 1; }
+      const col = new Uint16Array(c.w);
+      for (let gx = 0; gx < c.w; gx++) { let run = 0, best = 0; for (let gy = 0; gy < c.h; gy++) { if (grid[gy * c.w + gx]) { run++; if (run > best) best = run; } else run = 0; } col[gx] = best; }
       const third = Math.max(1, Math.round(c.w * 0.38));
       let lm = 0, rm = 0; for (let a = 0; a < third; a++) lm = Math.max(lm, col[a]); for (let a = c.w - third; a < c.w; a++) rm = Math.max(rm, col[a]);
       const lr = lm / c.h, rr = rm / c.h;
@@ -553,6 +612,29 @@ function omrReadPage(imgData) {
     return null;
   };
 
+  // ---------- systems: staves joined at the left by a bracket or line are the parts of one score, played together ----------
+  const SV = res.staves, sysOf = SV.map((_, i) => i);
+  {
+    const joined = (a, b) => {
+      const ya = Math.round(a.bot) + 2, yb = Math.round(b.top) - 2, p = a.p;
+      if (yb <= ya) return false;
+      for (let x = Math.max(0, Math.round(Math.min(a.left, b.left) - 1.5 * p)); x <= Math.min(W - 1, Math.round(Math.max(a.left, b.left) + 0.3 * p)); x++) {
+        let n = 0; for (let y = ya; y <= yb; y++) if (bin[y * W + x]) n++;
+        if (n >= 0.95 * (yb - ya + 1)) return true;
+      }
+      return false;
+    };
+    let sys = 0; sysOf[0] = 0;
+    for (let i = 1; i < SV.length; i++) { if (!joined(SV[i - 1], SV[i])) sys++; sysOf[i] = sys; }
+    // nothing joins them, but the clefs come round in a repeating pattern (treble, alto, bass, treble, ...): group by it
+    const cl = SV.map(s => s.clefType || '?');
+    if (sys === SV.length - 1 && SV.length >= 4 && new Set(cl).size > 1) {
+      for (let k = 2; k <= 6; k++) if (SV.length % k === 0 && cl.every((c, i) => c === cl[i % k])) { SV.forEach((_, i) => sysOf[i] = Math.floor(i / k)); break; }
+    }
+  }
+  const posOf = SV.map((_, i) => { let k = 0; for (let j = i - 1; j >= 0 && sysOf[j] === sysOf[i]; j--) k++; return k; });
+  const sizeOf = SV.map((_, i) => sysOf.filter(s => s === sysOf[i]).length);
+
   // ---------- per staff ----------
   res.staves.forEach((st, si) => {
     const p = st.p;
@@ -560,7 +642,7 @@ function omrReadPage(imgData) {
     // A sharp or flat right up against a note is that note's own accidental, not part of the key signature
     // (it happens when a line starts with an altered note and there is no key signature).
     const accs = (st.keyAccs || []).slice(); let dropped = null;
-    const onStaff = res.notes.filter(n => n.staff === si);
+    const onStaff = res.notes.filter(n => n.staff === si && n.x > st.musicStart - 0.2 * p);
     while (accs.length) {
       const c = accs[accs.length - 1];
       const own = onStaff.some(n => { const gap = n.x - (n.w || p) / 2 - c.maxx; return gap >= -0.3 * p && gap <= 0.9 * p && n.y >= c.miny - 0.3 * p && n.y <= c.maxy + 0.3 * p; });
@@ -623,7 +705,8 @@ function omrReadPage(imgData) {
       if (hasStem && !hollow) {
         const tip = n.y + best.dir * best.len, to = tip - best.dir * 1.7 * p;
         // beams reach out on either side of the stem; a flag hangs just to the right of it
-        const beam = [1, -1].map(sg => med3([0.9, 1.25, 1.6].map(dx => bandCount(best.x + sg * dx * p, tip, to, p))));
+        // (near the stem as well: a short double beam between two close notes ends before 0.9 spaces out)
+        const beam = [1, -1].map(sg => Math.max(med3([0.35, 0.55, 0.75].map(dx => bandCount(best.x + sg * dx * p, tip, to, p))), med3([0.9, 1.25, 1.6].map(dx => bandCount(best.x + sg * dx * p, tip, to, p)))));
         const flag = med3([0.4, 0.6, 0.8].map(dx => bandCount(best.x + dx * p, tip, to, p)));
         bands = Math.max(beam[0], beam[1], flag);
       }
@@ -641,20 +724,35 @@ function omrReadPage(imgData) {
 
     // ---------- bar lines ----------
     const spanTop = Math.round(st.top), spanBot = Math.round(st.bot);
+    // in a full score a bar line may run on through the gap to the next staff of the same system
+    const prevS = si > 0 && sysOf[si - 1] === sysOf[si] ? SV[si - 1] : null, nextS = si + 1 < SV.length && sysOf[si + 1] === sysOf[si] ? SV[si + 1] : null;
+    const upGap = prevS ? spanTop - Math.round(prevS.bot) - 2 : 0, dnGap = nextS ? Math.round(nextS.top) - spanBot - 2 : 0;
     const cols = [];
-    for (let x = Math.round(st.left + 2.5 * p); x <= Math.min(W - 1, Math.round(st.right + 3)); x++) {
+    // (start after the clef: a C clef's thick bars span the staff like a bar line)
+    for (let x = Math.round(Math.max(st.left + 2.5 * p, (st.clefRight || 0) + 0.3 * p)); x <= Math.min(W - 1, Math.round(st.right + 3)); x++) {
       let ok = true; for (let y = spanTop; y <= spanBot; y++) if (!bin[y * W + x]) { ok = false; break; }
       if (!ok) continue;
-      let up = 0; while (up < 1.2 * p && bin[(spanTop - 1 - up) * W + x]) up++;
-      let dn = 0; while (dn < 1.2 * p && bin[(spanBot + 1 + dn) * W + x]) dn++;
-      if (up <= 0.55 * p && dn <= 0.55 * p && !mine.some(n => Math.abs(n.x - x) <= 0.85 * p)) cols.push(x);   // a stem right beside a notehead is not a bar line
+      let up = 0; while (up < Math.max(1.2 * p, upGap + 1) && spanTop - 1 - up >= 0 && bin[(spanTop - 1 - up) * W + x]) up++;
+      let dn = 0; while (dn < Math.max(1.2 * p, dnGap + 1) && spanBot + 1 + dn < H && bin[(spanBot + 1 + dn) * W + x]) dn++;
+      const upOk = up <= 0.55 * p || (prevS && up >= upGap), dnOk = dn <= 0.55 * p || (nextS && dn >= dnGap);
+      if (upOk && dnOk && !mine.some(n => Math.abs(n.x - x) <= 0.85 * p)) cols.push(x);   // a stem right beside a notehead is not a bar line
     }
     const bars = [];
     for (const x of cols) { const last = bars[bars.length - 1]; if (last && x - last.x1 <= 2 * LT + 2) last.x1 = x; else bars.push({ x0: x, x1: x }); }
-    const barX = []; for (const b of bars) { const x = (b.x0 + b.x1) / 2; if (!barX.length || x - barX[barX.length - 1] > 0.9 * p) barX.push(x); }
-    // a thick bar line at the very end of the line closes a piece
+    // repeat signs: two dots in the middle spaces, before the bar line (end of a repeat) or after it (start of one)
+    const repDot = (cx, cy) => discFill(cx, cy, 0.16 * p) >= 0.75 && !dark(Math.round(cx), Math.round(cy - 0.38 * p)) && !dark(Math.round(cx), Math.round(cy + 0.38 * p));
+    const dots = x => repDot(x, st.top + 1.5 * p) && repDot(x, st.top + 2.5 * p);
+    for (const b of bars) {
+      for (let dx = 0.25; dx <= 1.0 && !b.end; dx += 0.06) if (dots(b.x0 - dx * p)) b.end = true;
+      for (let dx = 0.25; dx <= 1.0 && !b.start; dx += 0.06) if (dots(b.x1 + dx * p)) b.start = true;
+    }
+    const barX = [], barRep = [];
+    for (const b of bars) { const x = (b.x0 + b.x1) / 2, k = barX.length - 1;
+      if (!barX.length || x - barX[k] > 0.9 * p) { barX.push(x); barRep.push({ start: !!b.start, end: !!b.end }); }
+      else { barRep[k].start = barRep[k].start || !!b.start; barRep[k].end = barRep[k].end || !!b.end; } }
+    // a thick bar line at the very end of the line closes a piece (unless it only ends a repeat)
     const lastBar = bars[bars.length - 1];
-    const endsFinal = !!lastBar && lastBar.x1 - lastBar.x0 + 1 >= 0.3 * p && lastBar.x1 >= st.right - 0.8 * p;
+    const endsFinal = !!lastBar && lastBar.x1 - lastBar.x0 + 1 >= 0.3 * p && lastBar.x1 >= st.right - 0.8 * p && !(barRep.length && barRep[barRep.length - 1].end);
 
     // ---------- rests ----------
     const y0 = Math.max(0, Math.round(st.top - 0.35 * p)), y1 = Math.min(H - 1, Math.round(st.bot + 0.35 * p));
@@ -721,8 +819,80 @@ function omrReadPage(imgData) {
       const b = omrReadNumber(clean, W, H, st.tsBox[0] - 2, st.tsBox[1] + 2, Math.round(st.top + 2.15 * p), Math.round(st.bot + 0.2 * p));
       if (a && a <= 16 && [1, 2, 4, 8, 16].includes(b)) ts = [a, b];
     }
-    out.staves.push({ p, left: st.left, right: st.right, top: st.top, bot: st.bot, fifths, keyBox: accs.length ? [accs[0].minx, accs[accs.length - 1].maxx] : null, droppedAcc: !!dropped, musicStart: st.musicStart, barX, elems, totals, acc, ts, endsFinal });
+    if (!ts && st.tsSym) ts = st.tsSym;   // C or cut C
+    // First and second endings: a thin line above the top staff of a system, with a hook down at its start and a
+    // number under it. (A beam is thick, and a slur has no straight hook.)
+    const voltas = [];
+    if (posOf[si] === 0) {
+      const ya = Math.max(0, Math.round(st.top - 4.5 * p)), yb = Math.round(st.top - 0.9 * p), found = [];
+      for (let y = ya; y <= yb; y++) {
+        let s = -1;
+        for (let x = Math.max(0, Math.round(st.left)); x <= Math.min(W - 1, Math.round(st.right)) + 1; x++) {
+          const v = x <= st.right && bin[y * W + x];
+          if (v && s < 0) { s = x; continue; }
+          if (v || s < 0) continue;
+          const x0 = s, x1 = x - 1; s = -1;
+          if (x1 - x0 < 2 * p || found.some(f => Math.abs(f.x0 - x0) < 0.6 * p && Math.abs(f.y - y) < 0.5 * p)) continue;
+          let thick = false;
+          for (const f of [0.25, 0.5, 0.75]) { const xm = Math.round(x0 + f * (x1 - x0)); let th = 0; for (let yy = y - 4; yy < y + p; yy++) if (yy >= 0 && bin[yy * W + xm]) th++; if (th > LT + 3) thick = true; }
+          if (thick || x1 - x0 < 2.5 * p) continue;                    // a beam is thick; an ending's bracket is a thin line
+          let hook = 0; for (let yy = y + 1; yy < y + 1.6 * p; yy++) { let any = false; for (let xx = x0; xx <= x0 + 3; xx++) if (bin[yy * W + xx]) { any = true; break; } if (any) hook++; else break; }
+          if (hook < 0.6 * p) continue;
+          found.push({ x0, x1, y });
+        }
+      }
+      found.sort((a, b) => a.x0 - b.x0).forEach(f => {
+        // (the number can sit a few spaces in from the hook)
+        const n = omrReadNumber(bin, W, H, Math.round(f.x0 + 0.3 * p), Math.round(Math.min(f.x1 - 0.2 * p, f.x0 + 5 * p)), Math.round(f.y + 0.2 * p), Math.round(Math.min(f.y + 2.2 * p, st.top - 0.5 * p)));
+        if (n && n <= 4) voltas.push({ n, x0: f.x0, x1: f.x1, y: f.y });            // no number, no ending
+      });
+    }
+    out.staves.push({ p, left: st.left, right: st.right, top: st.top, bot: st.bot, fifths, keyBox: accs.length ? [accs[0].minx, accs[accs.length - 1].maxx] : null, droppedAcc: !!dropped, musicStart: st.musicStart, barX, barRep, elems, totals, acc, ts, endsFinal,
+      clefType: st.clefType || null, sys: sysOf[si], pos: posOf[si], sysSize: sizeOf[si], voltas });
   });
+  // the staves of one system share the endings drawn over its top staff, and its time signature
+  const bySys = {};
+  out.staves.forEach(s => (bySys[s.sys] = bySys[s.sys] || []).push(s));
+  for (const k in bySys) {
+    const grp = bySys[k], top = grp.find(s => s.pos === 0);
+    if (top && top.voltas.length) grp.forEach(s => { if (s !== top) s.voltas = top.voltas; });
+    if (grp.length > 1) {
+      const withTs = grp.filter(s => s.ts);
+      if (withTs.length * 2 > grp.length) {
+        const cnt = {}; withTs.forEach(s => { const k2 = s.ts.join('/'); cnt[k2] = (cnt[k2] || 0) + 1; });
+        const best = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0].split('/').map(Number);
+        grp.forEach(s => s.ts = best);
+      } else grp.forEach(s => s.ts = null);           // one staff alone with a time signature was a misreading
+    }
+  }
+  // Keep the parts of a system together: a bar lasts as long in every staff. If one staff's bar came out short (a note
+  // was missed) it is filled with a rest; if it came out long, its last note is cut short.
+  for (const k in bySys) {
+    const grp = bySys[k]; if (grp.length < 2) continue;
+    for (const s of grp) {
+      const p = s.p;
+      for (let b = 1; b < s.barX.length; b++) {
+        const own = s.totals[b]; if (own === null) continue;            // (null: a several-bar rest)
+        const x0 = s.barX[b - 1], x1 = s.barX[b], others = [];
+        for (const o of grp) { if (o === s) continue;
+          for (let c = 1; c < o.barX.length; c++) if (Math.abs(o.barX[c - 1] - x0) < p && Math.abs(o.barX[c] - x1) < p) { if (o.totals[c] != null) others.push(o.totals[c]); break; } }
+        if (!others.length) continue;
+        if (own === undefined) {   // nothing was read in this bar (a whole-bar rest missed): it lasts as long as the others say
+          if (others.some(v => v !== others[0])) continue;
+          s.elems.push({ kind: 'rest', x: (x0 + x1) / 2, y: s.top + 1.5 * p, d: others[0], box: [(x0 + x1) / 2 - 0.5 * p, s.top + p, p, 0.5 * p], padded: true, bar: b });
+          s.totals[b] = others[0]; continue;
+        }
+        const cnt = {}; [own, ...others].forEach(v => cnt[v] = (cnt[v] || 0) + 1);
+        const agreed = +Object.keys(cnt).sort((a, c) => cnt[c] - cnt[a])[0];
+        if (agreed === own || cnt[agreed] < 2 || cnt[own] >= cnt[agreed]) continue;
+        const inBar = s.elems.filter(e => e.bar === b), last = inBar[inBar.length - 1];
+        if (own < agreed) { if (last && last.tie) continue; s.elems.push({ kind: 'rest', x: x1 - 0.3 * p, y: s.top + 2 * p, d: agreed - own, box: [x1 - 0.7 * p, s.top + 1.4 * p, 0.4 * p, 1.2 * p], padded: true, bar: b }); }
+        else if (last && last.d > own - agreed) last.d -= own - agreed; else continue;
+        s.totals[b] = agreed;
+      }
+      s.elems.sort((a, c) => a.x - c.x);
+    }
+  }
   return out;
 }
 
@@ -765,10 +935,11 @@ const omrKeyOff = f => { const o = {}; OMR_LET.split('').forEach(l => o[l] = 0);
 // note the key already flattens). Sets keyFinal on every staff, and sec on the first staff of each piece.
 function omrSettle(pages, clef) {
   const topDia = OMR_TOPDIA[clef] || 32, rows = [];
-  pages.forEach(pg => { if (pg) pg.staves.forEach(s => rows.push(s)); });
+  pages.forEach(pg => { if (pg) pg.staves.forEach(s => { s._page = pg; rows.push(s); }); });
   // pieces from time signatures and final bar lines
   let pieces = [], cur = null, prevFinal = true;
-  for (const s of rows) { if (!cur || s.ts || prevFinal) { cur = { staves: [], ts: s.ts || null }; pieces.push(cur); } cur.staves.push(s); prevFinal = !!s.endsFinal; }
+  // (in a full score the pieces are decided for the whole system beforehand: forceSec)
+  for (const s of rows) { const here = s.forceSec != null ? s.forceSec : !!s.ts || prevFinal; if (!cur || here) { cur = { staves: [], ts: s.ts || null }; pieces.push(cur); } cur.staves.push(s); prevFinal = !!s.endsFinal; }
   // inside a piece: a lone staff that disagrees with its neighbours takes theirs; a lasting change starts a new piece
   const split = [];
   for (const pc of pieces) {
@@ -776,6 +947,10 @@ function omrSettle(pages, clef) {
     for (let i = 0; i < k.length; i++) {
       const a = i > 0 ? k[i - 1] : null, b = i + 1 < k.length ? k[i + 1] : null;
       if (k[i] !== a && k[i] !== b && (a === b ? a != null : (a == null ? b != null && k[i + 2] === b : b == null && k[i - 2] === a))) k[i] = a != null ? a : b;
+    }
+    if (pc.staves[0].forceSec != null) {   // a piece of a full score keeps one key: the one most of its staves show
+      const cnt = {}; k.forEach(v => cnt[v] = (cnt[v] || 0) + 1);
+      split.push({ staves: pc.staves, ts: pc.ts, key: +Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] }); continue;
     }
     let part = null;
     pc.staves.forEach((s, i) => { if (!part || k[i] !== part.key) { part = { staves: [], ts: part ? null : pc.ts, key: k[i] }; split.push(part); } part.staves.push(s); });
@@ -788,7 +963,7 @@ function omrSettle(pages, clef) {
         for (const e of s.elems) {
           if (e.bar !== bar) { bar = e.bar; before = carry; carry = {}; }
           if (e.kind !== 'note' || e.accOff == null) continue;
-          const dia = topDia - e.step, letter = OMR_LET[((dia % 7) + 7) % 7];
+          const dia = (OMR_TOPDIA[s.clefType] || topDia) - e.step, letter = OMR_LET[((dia % 7) + 7) % 7];
           const now = carry[dia] != null ? carry[dia] : ko[letter];
           all++; if (e.accOff === now && before[dia] == null) n++;       // (a reminder after last bar's change is fine)
           carry[dia] = e.accOff;
@@ -802,7 +977,16 @@ function omrSettle(pages, clef) {
     }
   }
   let lastTs = null;
-  for (const pc of split) { if (pc.ts) lastTs = pc.ts; pc.staves.forEach((s, i) => { s.keyFinal = pc.key; s.secTs = pc.ts; s.pieceTs = lastTs; s.sec = i === 0 ? { k: pc.key, ts: pc.ts } : null; s.keyFromNotes = !!pc.keyFromNotes; }); }
+  const titleOf = s => {   // the biggest words between this system and the one above it (the piece's title)
+    // (only real words count: some PDFs print the music itself as characters of a music font)
+    const pg = s._page, words = pg && pg.texts ? pg.texts.filter(t => /[A-Za-zÀ-ɏ]{2,}/.test(t.str)) : [];
+    if (!words.length) return null;
+    const top = pg.staves.find(x => x.sys === s.sys) || s, i = pg.staves.indexOf(top), above = i > 0 ? pg.staves[i - 1].bot + 2 * s.p : 0;
+    const sizes = words.map(t => t.size).sort((a, b) => a - b), med = sizes[sizes.length >> 1];
+    const c = words.filter(t => t.y < top.top - 1.5 * s.p && t.y > above && t.size >= 1.25 * med).sort((a, b) => b.size - a.size)[0];
+    return c ? words.filter(t => Math.abs(t.y - c.y) < 0.3 * c.size && Math.abs(t.size - c.size) < 0.1 * c.size).sort((a, b) => a.x - b.x).map(t => t.str).join(' ').trim() : null;
+  };
+  for (const pc of split) { if (pc.ts) lastTs = pc.ts; pc.staves.forEach((s, i) => { s.keyFinal = pc.key; s.secTs = pc.ts; s.pieceTs = lastTs; s.sec = i === 0 ? { k: pc.key, ts: pc.ts, title: titleOf(s) } : null; s.keyFromNotes = !!pc.keyFromNotes; }); }
   return split;
 }
 
@@ -810,25 +994,41 @@ function omrSettle(pages, clef) {
 // piece (omrSettle). barT: ticks in a bar, for rests that last several bars when no time signature was read.
 // The first note of each piece carries sec: {k, ts} so that the score can show the new key and time signature.
 function omrItems(page, clef, fifthsOverride, barT) {
-  const items = [], topDia = OMR_TOPDIA[clef] || 32;
+  const items = [];
   let tied = null;                                   // the item a tie is still holding on to, even across lines
   for (const st of page.staves) {
+    const topDia = OMR_TOPDIA[st.clefType] || OMR_TOPDIA[clef] || 32;   // every staff in its own clef
     const f = fifthsOverride != null ? fifthsOverride : st.keyFinal != null ? st.keyFinal : st.fifths;
-    const keyOff = omrKeyOff(f), bt = st.secTs ? st.secTs[0] * 64 / st.secTs[1] : barT;
+    const keyOff = omrKeyOff(f), bt = st.pieceTs ? st.pieceTs[0] * 64 / st.pieceTs[1] : barT;
     const start = items.length;
-    let bar = -1, carry = {};
+    // repeat signs: a start sign on bar line k opens bar k+1, an end sign on bar line k closes bar k
+    const startAt = new Set(), endAt = new Set();
+    (st.barRep || []).forEach((r, k) => { if (r.start) startAt.add(k + 1); if (r.end) endAt.add(k); });
+    let bar = -1, carry = {}, openRep = false, barMark = null;
     for (const e of st.elems) {
-      if (e.bar !== bar) { bar = e.bar; carry = {}; }
-      if (e.kind === 'rest') { items.push({ m: null, d: e.multi ? e.multi * (bt || 64) : e.d }); tied = null; continue; }
+      if (e.bar !== bar) {
+        if (endAt.has(bar) && items.length > start) items[items.length - 1].re = true;
+        if (startAt.has(e.bar)) openRep = true;
+        bar = e.bar; carry = {};
+        // where this bar is in the score (page, system, and its bar line's place across the page), so that the parts
+        // of a full score can be kept together bar by bar when they play
+        barMark = { at: page.no + '.' + st.sys, x: e.bar > 0 && st.barX[e.bar - 1] != null ? st.barX[e.bar - 1] / st.p : 0 };
+      }
+      const vol = (st.voltas || []).find(v => e.x >= v.x0 && e.x <= v.x1);
+      if (e.kind === 'rest') { const r = { m: null, d: e.multi ? e.multi * (bt || 64) : e.d }; if (openRep) { r.rs = true; openRep = false; } if (vol) r.v = vol.n; if (barMark) { r.bar = barMark.at; r.bx = +barMark.x.toFixed(2); barMark = null; } items.push(r); tied = null; continue; }
       const dia = topDia - e.step, letter = OMR_LET[((dia % 7) + 7) % 7], oct = Math.floor(dia / 7);
       if (tied && tied.dia === dia) { tied.item.d += Math.round(e.d); if (!e.tie) tied = null; continue; }   // a tied note just lengthens the first one
       let off = keyOff[letter];
       if (e.accOff != null) { off = e.accOff; carry[dia] = off; } else if (carry[dia] != null) off = carry[dia];
       const item = { m: 12 * (oct + 1) + OMR_BASE[letter] + off, d: Math.round(e.d) };
+      if (openRep) { item.rs = true; openRep = false; }
+      if (vol) item.v = vol.n;
+      if (barMark) { item.bar = barMark.at; item.bx = +barMark.x.toFixed(2); barMark = null; }
       items.push(item);
       tied = e.tie ? { item, dia } : null;
     }
-    if (st.sec && items.length > start) items[start].sec = { k: fifthsOverride != null ? fifthsOverride : st.sec.k, ts: st.sec.ts };
+    if (endAt.has(bar) && items.length > start) items[items.length - 1].re = true;
+    if (st.sec && items.length > start) items[start].sec = { k: fifthsOverride != null ? fifthsOverride : st.sec.k, ts: st.sec.ts, title: st.sec.title || null, clef: st.clefType || null };
   }
   return items;
 }
@@ -854,6 +1054,8 @@ function omrDrawOverlay(ctx, page, expectBar) {
     ctx.fillStyle = fixed ? '#c62828' : '#6a1b9a';
     ctx.fillText((st.sec ? 'New piece · ' : '') + 'Key: ' + (kf === 0 ? 'none' : Math.abs(kf) + (kf > 0 ? ' sharp' : ' flat') + (Math.abs(kf) > 1 ? 's' : '')) + (fixed ? ' (corrected)' : '') + (st.sec && st.sec.ts ? ' · ' + st.sec.ts.join('/') : ''), st.left, st.top - 2.6 * p);
     ctx.textAlign = 'center';
+    if (st.pos === 0) (st.voltas || []).forEach(v => { ctx.strokeStyle = '#00838f'; ctx.fillStyle = '#00838f'; ctx.beginPath(); ctx.moveTo(v.x0, v.y + 1.2 * p); ctx.lineTo(v.x0, v.y); ctx.lineTo(v.x1, v.y); ctx.stroke(); ctx.fillText('ending ' + v.n, v.x0 + 2.2 * p, v.y - 0.3 * p); });
+    (st.barRep || []).forEach((r, i) => { if (!r.start && !r.end) return; const x = st.barX[i]; ctx.fillStyle = '#00838f'; ctx.fillText((r.end ? ':' : '') + '||' + (r.start ? ':' : ''), x, st.bot + 2.6 * p); });
     st.barX.forEach((x, i) => { const bad = exp && st.totals[i] != null && i >= 1 && Math.round(st.totals[i]) !== exp; ctx.strokeStyle = 'rgba(0,150,0,.55)'; ctx.beginPath(); ctx.moveTo(x, st.top - 0.4 * p); ctx.lineTo(x, st.bot + 0.4 * p); ctx.stroke();
       if (i >= 1 && bad) { ctx.fillStyle = 'rgba(220,0,0,.14)'; ctx.fillRect(st.barX[i - 1], st.top - 0.4 * p, x - st.barX[i - 1], st.bot - st.top + 0.8 * p); } });
     ctx.font = `bold ${Math.round(p * 0.9)}px sans-serif`;

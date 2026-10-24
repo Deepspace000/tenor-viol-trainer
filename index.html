@@ -39,6 +39,15 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
 #recscore{background:#f3e8d0;border-radius:8px;padding:6px;min-height:80px;color:#1a1410}
 #recscore .ph{color:#7a6a4e;padding:24px;text-align:center}
 #rectitle{display:none}
+#partsBar{display:flex;flex-direction:column;gap:4px;margin:2px 0 8px}
+.prow{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:4px 8px;border:1px solid #3d2f22;border-radius:8px}
+.prow.on{border-color:var(--gold);background:#2f2419}
+.prow .pname{font-weight:bold;min-width:140px;text-align:left}
+span.pname{min-width:0;color:var(--dim)}
+.prow .ms{min-width:38px;font-weight:bold}
+.prow .ms.mute.on{background:#b03a2e;border-color:#b03a2e;color:#fff}
+.prow .ms.solo.on{background:var(--gold);border-color:var(--gold);color:#1a1410}
+.prow input[type=range]{width:110px}
 .grp{display:inline-flex;gap:4px;flex-wrap:wrap}
 .pal .gl{font-size:20px;line-height:1;font-family:'Segoe UI Symbol','Noto Music',serif}
 @media print{
@@ -111,6 +120,8 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
       <label>Tempo <input type="number" id="bpm" value="60" min="30" max="240" style="width:64px"> crotchets/min</label>
       <label>Title <input type="text" id="title" placeholder="Untitled" style="width:150px"></label>
       <button id="playBtn">▶ Play</button>
+      <label>From <select id="fromSel" style="max-width:260px"></select></label>
+      <label>Bar <input type="number" id="fromBar" min="1" placeholder="–" style="width:58px"></label>
       <button class="rec" id="recBtn">● Record (mic)</button>
     </div>
     <div class="controls" style="margin-bottom:8px">
@@ -131,6 +142,7 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
       <input type="file" id="impFile" accept=".json,.mid,.midi,.musicxml,.xml,.pdf,image/*" style="display:none">
     </div>
   </div>
+  <div class="noprint" id="partsBar"></div>
   <div class="noprint score" id="recstat"></div>
   <h2 id="rectitle"></h2>
   <div id="recscore"></div>
@@ -166,11 +178,11 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
 </div>
 
 <script src="vexflow.js"></script>
-<script src="omr.js?v=1.2"></script>
+<script src="omr.js?v=1.4"></script>
 <script>
-const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline} = Vex.Flow;
+const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='1.3';
+const APP_VERSION='1.4';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -258,17 +270,52 @@ function wakeAudio(){
 }
 ['pointerdown','pointerup','touchend','click','keydown'].forEach(ev=>addEventListener(ev,wakeAudio,{capture:true,passive:true}));
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&silentEl)silentEl.pause();});
+/* ---------- string sounds ----------
+   A bowed string is close to a sawtooth wave. Here it is shaped by the instrument's body (two resonances), a gentle
+   bow attack and a vibrato that comes in after the note starts. Every part has its own volume and place from left to
+   right, and all of them go through one room (reverb). */
+const INST={
+  violin:{lp:[8,7000],body:[[480,1.4,5],[2900,1.6,6]],vib:[5.8,11],att:0.05,gain:0.15},
+  viola: {lp:[7,5000],body:[[350,1.3,5],[1700,1.4,5]],vib:[5.3,10],att:0.07,gain:0.17},
+  cello: {lp:[6,3500],body:[[210,1.2,6],[750,1.4,4]],vib:[4.9,9],att:0.09,gain:0.2}
+};
+let master=null,wet=null,dry=null;
+function audioOut(){
+  const c=audioCtx();
+  if(!master){
+    master=c.createGain();master.gain.value=0.75;dry=c.createGain();wet=c.createGain();
+    const rv=c.createConvolver();rv.buffer=roomImpulse(c,2.4);
+    // several parts together can add up past full volume: a gentle limiter keeps them from distorting
+    const lim=c.createDynamicsCompressor();lim.threshold.value=-8;lim.knee.value=6;lim.ratio.value=8;lim.attack.value=0.005;lim.release.value=0.2;
+    master.connect(dry).connect(lim);master.connect(rv);rv.connect(wet).connect(lim);lim.connect(c.destination);
+    setReverb(sc.reverb);
+  }
+  return master;
+}
+function roomImpulse(c,sec){   // the sound of a room: noise that dies away
+  const n=Math.round(c.sampleRate*sec),b=c.createBuffer(2,n,c.sampleRate);
+  for(let ch=0;ch<2;ch++){const d=b.getChannelData(ch);for(let i=0;i<n;i++){const t=i/n;d[i]=(Math.random()*2-1)*Math.pow(1-t,3)*Math.min(1,i/(c.sampleRate*0.008));}}
+  return b;
+}
+function setReverb(v){sc.reverb=v;if(wet){wet.gain.value=v*1.1;dry.gain.value=1-v*0.4;}}
 // small speakers hardly play the low strings' fundamentals, so keep enough overtones for them to be heard
-const toneCutoff=f=>Math.min(4000,Math.max(1300,f*6));
+const toneCutoff=(f,I=INST.viola)=>Math.min(I.lp[1],Math.max(1300,f*I.lp[0]));
+function voice(m,t,len,inst,dest){
+  const c=ac,f=440*Math.pow(2,(m-69)/12),I=INST[inst]||INST.viola,end=t+len+0.25;
+  const lp=c.createBiquadFilter();lp.type='lowpass';lp.frequency.value=toneCutoff(f,I);lp.Q.value=0.6;
+  let last=lp;for(const [fr,q,gn] of I.body){const b=c.createBiquadFilter();b.type='peaking';b.frequency.value=fr;b.Q.value=q;b.gain.value=gn;last.connect(b);last=b;}
+  const env=c.createGain(),a=Math.min(I.att,len*0.4);
+  env.gain.setValueAtTime(0,t);env.gain.linearRampToValueAtTime(I.gain,t+a);
+  env.gain.setValueAtTime(I.gain,t+Math.max(a,len-0.03));env.gain.linearRampToValueAtTime(0.0001,end);
+  const lfo=c.createOscillator(),vd=c.createGain();lfo.frequency.value=I.vib[0];
+  vd.gain.setValueAtTime(0,t);vd.gain.linearRampToValueAtTime(I.vib[1],t+Math.min(0.4,len*0.6));lfo.connect(vd);
+  [-5,5].forEach(d=>{const o=c.createOscillator();o.type='sawtooth';o.frequency.value=f;o.detune.value=d;vd.connect(o.detune);o.connect(lp);o.start(t);o.stop(end+0.05);});
+  lfo.start(t);lfo.stop(end+0.05);
+  last.connect(env).connect(dest);
+}
 function play(m){
   if(!st.sound||(rec.on&&rec.mic))return;
-  audioCtx();
-  const t=ac.currentTime,f=440*Math.pow(2,(m-69)/12);
-  const g=ac.createGain(),lp=ac.createBiquadFilter();
-  lp.type='lowpass';lp.frequency.value=toneCutoff(f);lp.Q.value=.7;
-  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.22,t+.12);g.gain.exponentialRampToValueAtTime(.0008,t+1.8);
-  [-4,4].forEach(d=>{const o=ac.createOscillator();o.type='sawtooth';o.frequency.value=f;o.detune.value=d;o.connect(lp);o.start(t);o.stop(t+1.9);});
-  lp.connect(g).connect(ac.destination);
+  const out=audioOut();voice(m,ac.currentTime,1.2,part().sound||'viola',out);
 }
 
 /* ---------- neck ---------- */
@@ -470,7 +517,7 @@ function refresh(){buildAnswerUI();setMode();}
 
 $('mode').onchange=setMode;
 $('clef').onchange=()=>{st.clef=$('clef').value;drawRecording();st.mode==='explore'?(drawStaff([]),msg('Clef changed – click a note')):setMode();};
-$('key').onchange=()=>{st.key=+$('key').value;if(sc.items[0]&&sc.items[0].sec)sc.items[0].sec.k=st.key;refresh();drawRecording();};
+$('key').onchange=()=>{st.key=+$('key').value;sc.parts.forEach(p=>{if(p.items[0]&&p.items[0].sec)p.items[0].sec.k=st.key;});refresh();drawRecording();};
 $('acc').onchange=()=>{st.acc=$('acc').value;refresh();};
 $('frets').onchange=()=>{st.frets=+$('frets').value;refresh();};
 $('lbl').onchange=()=>{st.labels=$('lbl').checked;drawNeck();};
@@ -499,7 +546,43 @@ const REP=[];BASES.forEach((b,bi)=>[0,1,2].forEach(d=>REP.push({t:b[1]*(2-Math.p
 REP.sort((a,b)=>b.t-a.t);
 const repOf=t=>REP.find(r=>r.t===t)||REP.reduce((a,b)=>Math.abs(b.t-t)<Math.abs(a.t-t)?b:a);
 function decomp(t){const out=[];for(const r of REP){while(t>=r.t){out.push(r.t);t-=r.t;}}return out;}
-const sc={items:[],ts:[4,4],bpm:60,sel:-1,cur:0,hist:[],bi:3,dots:0};
+// The score is made of parts: one when you write it yourself, one per staff of a full score that was read.
+// sc.items and sc.hist always mean the part you are looking at.
+const newPart=(name,clef,sound,pan)=>({name,clef,sound,vol:0.8,pan:pan||0,mute:false,solo:false,items:[],hist:[]});
+const sc={ts:[4,4],bpm:60,sel:-1,cur:0,bi:3,dots:0,parts:[newPart('Tenor viol',null,'viola',0)],pi:0,reverb:0.3};
+Object.defineProperty(sc,'items',{get(){return sc.parts[sc.pi].items;},set(v){sc.parts[sc.pi].items=v;}});
+Object.defineProperty(sc,'hist',{get(){return sc.parts[sc.pi].hist;},set(v){sc.parts[sc.pi].hist=v;}});
+const part=()=>sc.parts[sc.pi];
+const scoreClef=()=>part().clef||st.clef;     // the tenor part follows the Clef box; a treble or bass part keeps its own clef
+const CLEF_NAME={treble:'treble clef',alto:'alto clef',tenor:'tenor clef',bass:'bass clef',treble8:'octave treble clef'};
+function buildParts(){
+  const B=$('partsBar');B.innerHTML='';
+  sc.parts.forEach((p,i)=>{
+    const r=document.createElement('div');r.className='prow'+(i===sc.pi?' on':'');
+    r.innerHTML=`<button class="pname" title="Show this part">${i===sc.pi?'▶ ':''}${p.name}</button><span class="score">${CLEF_NAME[p.clef||st.clef]||''}, ${p.items.filter(x=>x.m!=null).length} notes</span>`+
+      `<button class="ms mute${p.mute?' on':''}" title="Mute this part">M</button><button class="ms solo${p.solo?' on':''}" title="Play only the solo parts">S</button>`+
+      `<label>Volume <input type="range" class="vol" min="0" max="1" step="0.01" value="${p.vol}"></label>`+
+      `<label>Pan <input type="range" class="pan" min="-1" max="1" step="0.05" value="${p.pan}" title="Left to right"></label>`+
+      `<label>Sound <select class="snd">${['violin','viola','cello'].map(x=>`<option value="${x}"${x===p.sound?' selected':''}>${x[0].toUpperCase()+x.slice(1)}</option>`).join('')}</select></label>`;
+    r.querySelector('.pname').onclick=()=>usePart(i);
+    r.querySelector('.mute').onclick=()=>{p.mute=!p.mute;mixChanged();buildParts();};
+    r.querySelector('.solo').onclick=()=>{p.solo=!p.solo;mixChanged();buildParts();};
+    r.querySelector('.vol').oninput=e=>{p.vol=+e.target.value;mixChanged();};
+    r.querySelector('.pan').oninput=e=>{p.pan=+e.target.value;mixChanged();};
+    r.querySelector('.snd').onchange=e=>{p.sound=e.target.value;};
+    B.append(r);
+  });
+  const rv=document.createElement('div');rv.className='prow';
+  rv.innerHTML=`<span class="pname">Room</span><label>Reverb <input type="range" min="0" max="1" step="0.01" value="${sc.reverb}"></label>`;
+  rv.querySelector('input').oninput=e=>setReverb(+e.target.value);
+  B.append(rv);
+}
+function usePart(i){
+  if(i===sc.pi)return;
+  if(playing&&playing.lit!=null){paintNote(playing.lit,null);playing.lit=null;}
+  sc.pi=i;sc.sel=-1;sc.cur=sc.items.length;buildParts();drawRecording();
+  stat(`Showing the ${part().name} part.`);
+}
 const durT=()=>BASES[sc.bi][1]*(2-Math.pow(2,-sc.dots));
 const entryOn=()=>$('entryChk').checked&&st.mode==='explore';
 const stat=t=>{$('recstat').textContent=t;};
@@ -550,24 +633,28 @@ const keyName=k=>KEYS.find(x=>x[0]===k)[1];
 // Bars carry the key and time signature in force. A note with sec:{k,ts} starts a new piece: it begins a new bar
 // (even if the last bar is short) and can bring a new key and time signature.
 function splitBars(items){
-  let key=st.key,ts=sc.ts;
+  let key=st.key,ts=sc.ts,clef=null;
   const bars=[];let bar=null,used=0;
-  const open=sec=>{bar=[];bar.key=key;bar.ts=ts;bar.cap=ts[0]*64/ts[1];bar.sec=sec;bars.push(bar);used=0;};
+  const open=sec=>{bar=[];bar.key=key;bar.ts=ts;bar.clef=clef;bar.cap=ts[0]*64/ts[1];bar.sec=sec;bars.push(bar);used=0;};
   items.forEach((it,idx)=>{
     if(it.sec){
       const prevKey=key,prevTs=ts;
-      if(it.sec.k!=null)key=it.sec.k;if(it.sec.ts)ts=it.sec.ts;
-      const sec={prevKey,keyChange:key!==prevKey,tsChange:ts[0]!==prevTs[0]||ts[1]!==prevTs[1]};
-      if(bar&&!bar.length){bar.key=key;bar.ts=ts;bar.cap=ts[0]*64/ts[1];bar.sec=sec;}else open(sec);
+      if(it.sec.k!=null)key=it.sec.k;if(it.sec.ts)ts=it.sec.ts;if(it.sec.clef)clef=it.sec.clef;
+      const sec={prevKey,keyChange:key!==prevKey,tsChange:ts[0]!==prevTs[0]||ts[1]!==prevTs[1],title:it.sec.title||null};
+      if(bar&&!bar.length){bar.key=key;bar.ts=ts;bar.clef=clef;bar.cap=ts[0]*64/ts[1];bar.sec=sec;}else open(sec);
     }
+    if(it.rs&&bar&&bar.length)open(null);                 // a repeat starts with a new bar
     if(!bar)open(null);
+    if(it.rs)bar.repStart=true;
     let rem=it.d;const pieces=[];
     while(rem>0){
       if(used>=bar.cap)open(null);
       const take=Math.min(rem,bar.cap-used);
       decomp(take).forEach(p=>{const q={m:it.m,d:p,idx};bar.push(q);pieces.push(q);});
+      if(it.v)bar.volta=it.v;
       used+=take;rem-=take;
     }
+    if(it.re){bar.repEnd=true;used=bar.cap;}               // ...and the bar ends at an end repeat
     if(it.m!=null)for(let k=0;k<pieces.length-1;k++){pieces[k].tieNext=true;pieces[k+1].tiePrev=true;}
   });
   while(bars.length&&!bars[bars.length-1].length)bars.pop();
@@ -601,6 +688,7 @@ function drawRecording(){
   // hold the score's height while it is rebuilt, so the page never gets shorter for a moment and jumps
   const el=$('recscore');el.style.minHeight=el.offsetHeight+'px';
   try{drawScore(el);}finally{el.style.minHeight='';}
+  if(!rec.on)buildFrom();
 }
 function drawScore(el){
   el.innerHTML='';
@@ -615,14 +703,14 @@ function drawScore(el){
   const midW=b=>b.sec?ksW(b.key)+(b.sec.keyChange?ksW(b.sec.prevKey):0)+tsW+6:0;
   const sysList=[];let cur={bars:[],bw:[]},used=0;
   bars.forEach((b,bi)=>{
-    const bw=Math.max(80,b.reduce((a,p)=>a+nw(p),0)+24);
+    const bw=Math.max(80,b.reduce((a,p)=>a+nw(p),0)+24)+(b.repStart?14:0)+(b.repEnd?14:0);
     if(cur.bars.length&&used+bw+midW(b)>W-10){sysList.push(cur);cur={bars:[],bw:[]};used=0;}
     if(!cur.bars.length)used=headW(b,bi===0);else used+=midW(b);
     cur.bars.push(b);cur.bw.push(bw);used+=bw;
   });
   sysList.push(cur);
-  const vfClef=st.clef==='treble8'?'treble':st.clef,shift=st.clef==='treble8'?1:0;
-  const restKey={alto:'c/4',tenor:'a/3',treble:'b/4',treble8:'b/4',bass:'d/3'}[st.clef]||'b/4';
+  const barClef=b=>b.clef&&b.clef!==part().mainClef&&{alto:1,tenor:1,treble:1,bass:1}[b.clef]?b.clef:scoreClef();   // (only a clef this score can draw)
+  const REST_KEY={alto:'c/4',tenor:'a/3',treble:'b/4',treble8:'b/4',bass:'d/3'};
   const labelled=showNames()||showSolfa();
   const H=200+(showNames()?16:0)+(showSolfa()?16:0);
   const allNotes=[];
@@ -639,10 +727,19 @@ function drawScore(el){
     sys.bars.forEach((bar,bi)=>{
       const isFirst=bi===0,width=sys.bw[bi]*scale+extra[bi],next=bars[gb+1];
       const stave=new Stave(x,50,width);
-      if(isFirst){if(st.clef==='treble8')stave.addClef('treble','default','8vb');else stave.addClef(st.clef);
+      const clef=barClef(bar),vfClef=clef==='treble8'?'treble':clef,shift=clef==='treble8'?1:0,restKey=REST_KEY[clef]||'b/4';
+      const prevBar=gb>0?bars[gb-1]:null,clefChange=!isFirst&&prevBar&&barClef(prevBar)!==clef;
+      if(clefChange)stave.addClef(clef==='treble8'?'treble':clef,'small');
+      if(isFirst){if(clef==='treble8')stave.addClef('treble','default','8vb');else stave.addClef(clef);
         stave.addKeySignature(keyName(bar.key));if(gb===0||bar.sec)stave.addTimeSignature(bar.ts[0]+'/'+bar.ts[1]);}
       else if(bar.sec){stave.addKeySignature(keyName(bar.key),bar.sec.keyChange?keyName(bar.sec.prevKey):undefined);stave.addTimeSignature(bar.ts[0]+'/'+bar.ts[1]);}
       if(!next)stave.setEndBarType(Barline.type.END);else if(next.sec)stave.setEndBarType(Barline.type.DOUBLE);   // a double bar before each new piece
+      if(bar.repStart)stave.setBegBarType(Barline.type.REPEAT_BEGIN);
+      if(bar.repEnd)stave.setEndBarType(Barline.type.REPEAT_END);
+      if(bar.volta){   // first and second endings
+        const pv=gb>0?bars[gb-1].volta:null,nv=next?next.volta:null,beg=pv!==bar.volta,fin=nv!==bar.volta;
+        stave.setVoltaType(beg&&fin?Volta.type.BEGIN_END:beg?Volta.type.BEGIN:fin?Volta.type.END:Volta.type.MID,beg?bar.volta+'.':'',-12);
+      }
       stave.setContext(ctx).draw();
       const kn=keyName(bar.key),labels=[];
       const notes=bar.map(p=>{
@@ -687,15 +784,6 @@ function drawScore(el){
 }
 
 /* ---- playback ---- */
-function tone(m,t,len,dest){
-  const f=440*Math.pow(2,(m-69)/12),g=ac.createGain(),lp=ac.createBiquadFilter();
-  lp.type='lowpass';lp.frequency.value=toneCutoff(f);lp.Q.value=.7;
-  const a=Math.min(0.08,len*0.3),r=0.25;
-  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.2,t+a);
-  g.gain.setValueAtTime(.2,t+Math.max(a,len-0.04));g.gain.linearRampToValueAtTime(0.0001,t+len+r);
-  [-4,4].forEach(d=>{const o=ac.createOscillator();o.type='sawtooth';o.frequency.value=f;o.detune.value=d;o.connect(lp);o.start(t);o.stop(t+len+r+0.05);});
-  lp.connect(g).connect(dest||ac.destination);
-}
 let playing=null;
 // While the music plays the page follows it line by line. As soon as you scroll yourself it stops following and
 // leaves the page where you put it; scroll back to the playing line and it follows again.
@@ -711,34 +799,134 @@ function lightPlaying(i){
   if(!playing)return;
   if(playing.lit!=null)paintNote(playing.lit,playing.lit===sc.sel?'#1f5fbf':null);
   playing.lit=i;paintNote(i,'#e08a00');
-  const it=sc.items[i];if(it.m!=null)lightNeck(it.m);else{st.hl={};drawNeck();}
+  const it=sc.items[i];if(!it)return;
+  if(it.m!=null)lightNeck(it.m);else{st.hl={};drawNeck();}
   const e=(noteEls.get(i)||[])[0];if(!e)return;
   const line=e.closest('svg')||e,r=line.getBoundingClientRect(),inView=r.top>=0&&r.bottom<=innerHeight;
   if(!playing.follow&&inView&&performance.now()-lastUserScroll>1500)playing.follow=true;   // you came back to the music
   if(playing.follow&&!inView)line.scrollIntoView({block:'nearest'});
 }
+// mute and solo: with any part on solo only the solo parts sound; otherwise every part that is not muted
+const audible=p=>sc.parts.some(q=>q.solo)?p.solo:!p.mute;
+function mixChanged(){
+  if(!playing)return;
+  sc.parts.forEach((p,i)=>{const b=playing.buses[i];if(!b)return;b.g.gain.setTargetAtTime(audible(p)?p.vol:0,ac.currentTime,0.02);b.pan.pan.setTargetAtTime(p.pan,ac.currentTime,0.02);});
+}
+// The order the notes are played in, with repeats and first and second endings: at an end repeat go back once to
+// the start repeat (or to the start of the piece, or to just after the last repeat); the second time round skip the
+// first ending and go on into the second.
+function playOrder(items){
+  const order=[];let i=0,start=0,again=null,guard=0;
+  while(i<items.length&&guard++<items.length*6){
+    const it=items[i];
+    if((it.sec||it.rs)&&again==null)start=i;
+    if(again!=null&&it.v===1){i++;continue;}
+    order.push(i);
+    if(it.re&&again==null){again=i;i=start;continue;}
+    if(again!=null&&i>again&&it.v==null){again=null;start=i;}
+    i++;
+  }
+  return order;
+}
+// Where each bar starts (in ticks), numbered from 1 in every piece, and which bars begin a section you can start from.
+function barMap(){
+  const bars=splitBars(sc.items),out=[];let t=0,piece=0,num=0,prevRe=false,prevV=null;
+  bars.forEach((b,i)=>{
+    if(b.sec||i===0){piece++;num=0;}
+    num++;
+    const newEnd=b.volta&&b.volta!==prevV;
+    const kind=b.sec||i===0?'piece':newEnd?'ending':b.repStart?'repeat':prevRe?'after':null;
+    out.push({t,idx:b[0]?b[0].idx:0,piece,bar:num,kind,volta:b.volta||null,title:b.sec&&b.sec.title});
+    t+=b.reduce((a,p)=>a+p.d,0);prevRe=!!b.repEnd;prevV=b.volta||null;
+  });
+  return out;
+}
+function buildFrom(){
+  const S=$('fromSel'),keep=S.value,map=barMap(),pieces=map.filter(b=>b.kind==='piece').length;
+  S.innerHTML='';
+  const add=(v,l)=>{const o=document.createElement('option');o.value=v;o.textContent=l;S.append(o);};
+  add('start','the start');
+  map.forEach((b,i)=>{
+    if(!b.kind||(b.kind==='piece'&&i===0&&pieces<2))return;
+    const pre=pieces>1?`${b.piece}. `:'';
+    add(String(i),b.kind==='piece'?`${pre}${b.title||'Piece '+b.piece}`:
+      b.kind==='ending'?`${pre}ending ${b.volta} (bar ${b.bar})`:b.kind==='repeat'?`${pre}repeat from bar ${b.bar}`:`${pre}after the repeat (bar ${b.bar})`);
+  });
+  if([...S.options].some(o=>o.value===keep))S.value=keep;
+}
+// the tick to start playing from: a selected note, else the bar box (in the piece chosen in From), else From
+function startTick(){
+  const T=partTimes(leadPart())[sc.pi],at=i=>T[i]!=null?T[i]:0;
+  if(sc.sel>=0)return at(sc.sel);
+  const map=barMap(),v=$('fromSel').value,b=parseInt($('fromBar').value,10);
+  const chosen=v==='start'?map[0]:map[+v];
+  if(b>0&&chosen){const hit=map.find(x=>x.piece===chosen.piece&&x.bar===b);if(hit)return at(hit.idx);}
+  return chosen?at(chosen.idx):0;
+}
+function partTicks(p){let t=0;return p.items.map(it=>{const s=t;t+=it.d;return s;});}
+// When every part is played, the part that shows the repeats best leads; the others are pulled back into step with it
+// at every bar that came from the same place on the page (a note misread in one part then cannot put it out for good).
+function leadPart(){const marks=p=>p.items.reduce((a,it)=>a+(it.rs?1:0)+(it.re?1:0)+(it.v?1:0),0);let mi=sc.pi;sc.parts.forEach((p,i)=>{if(marks(p)>marks(sc.parts[mi]))mi=i;});return mi;}
+function partTimes(mi){
+  const own=sc.parts.map(partTicks),canon={};
+  sc.parts[mi].items.forEach((it,i)=>{if(it.bar!=null)(canon[it.bar]=canon[it.bar]||[]).push({x:it.bx,t:own[mi][i]});});
+  return sc.parts.map((p,pi)=>{
+    if(pi===mi)return own[pi];
+    let t=0;return p.items.map(it=>{
+      if(it.bar!=null&&canon[it.bar]){const m=canon[it.bar].find(c=>Math.abs(c.x-it.bx)<0.8);if(m)t=m.t;}
+      const s=t;t+=it.d;return s;});
+  });
+}
+// Every part follows the repeats of the part that shows them best, so that all parts stay together.
+function buildTimeline(fromTick){
+  const mi=leadPart(),P=partTimes(mi);
+  // a repeat sign only counts if most parts have it at (nearly) the same moment: one misread sign must not send the
+  // whole consort back to the wrong place
+  const sets=sc.parts.map((p,pi)=>{const rs=[],re=[];p.items.forEach((it,i)=>{if(it.rs)rs.push(P[pi][i]);if(it.re)re.push(P[pi][i]+it.d);});return {rs,re};});
+  const need=Math.ceil(sc.parts.length/2),near=(arr,t)=>arr.some(x=>Math.abs(x-t)<=16);
+  const ok=(k,t)=>sets.filter(m=>near(m[k],t)).length>=need;
+  const M=sc.parts[mi].items.map((it,i)=>(it.rs||it.re)?Object.assign({},it,{rs:it.rs&&ok('rs',P[mi][i]),re:it.re&&ok('re',P[mi][i]+it.d)}):it),MT=P[mi],segs=[];
+  for(const i of playOrder(M)){const t0=MT[i],t1=t0+M[i].d,last=segs[segs.length-1];if(last&&last.t1===t0)last.t1=t1;else segs.push({t0,t1});}
+  // a part that runs on past the end of the others is played to its end
+  const endAll=Math.max(...sc.parts.map((p,i)=>p.items.length?P[i][p.items.length-1]+p.items[p.items.length-1].d:0));
+  const lastSeg=segs[segs.length-1];if(lastSeg&&endAll>lastSeg.t1)segs.push({t0:lastSeg.t1,t1:endAll});else if(!segs.length)segs.push({t0:0,t1:endAll});
+  const ev=[];let at=0,started=false;
+  for(const sg of segs){
+    if(!started&&sg.t1<=fromTick)continue;
+    const a=started?sg.t0:Math.max(sg.t0,fromTick);started=true;
+    sc.parts.forEach((p,pi)=>p.items.forEach((it,i)=>{const s=P[pi][i];if(s>=a&&s<sg.t1)ev.push({pi,i,at:at+(s-a),m:it.m,d:Math.min(it.d,sg.t1-s)});}));
+    at+=sg.t1-a;
+  }
+  ev.sort((x,y)=>x.at-y.at);
+  return {ev,total:at};
+}
 function stopPlay(){
   if(!playing)return;
-  playing.timers.forEach(clearTimeout);
-  try{playing.bus.gain.cancelScheduledValues(0);playing.bus.gain.setValueAtTime(0,ac.currentTime);}catch(e){}
+  clearInterval(playing.loop);playing.timers.forEach(clearTimeout);
+  const out=playing.out;try{out.gain.cancelScheduledValues(0);out.gain.setTargetAtTime(0,ac.currentTime,0.03);setTimeout(()=>out.disconnect(),400);}catch(e){}
   if(playing.lit!=null)paintNote(playing.lit,playing.lit===sc.sel?'#1f5fbf':null);
   playing=null;$('playBtn').textContent='▶ Play';st.hl={};drawNeck();
 }
 function playScore(){
   if(playing){stopPlay();return;}
-  if(!sc.items.length){stat('Nothing to play yet.');return;}
-  audioCtx();
-  const bus=ac.createGain();bus.connect(ac.destination);
-  const per=60/sc.bpm/TPQ,timers=[],from=sc.sel>=0?sc.sel:0;let t=ac.currentTime+0.15;
-  for(let i=from;i<sc.items.length;i++){
-    const it=sc.items[i],len=it.d*per;
-    if(it.m!=null)tone(it.m,t,len*0.97,bus);
-    timers.push(setTimeout(()=>lightPlaying(i),(t-ac.currentTime)*1000));
-    t+=len;
-  }
-  timers.push(setTimeout(stopPlay,(t-ac.currentTime)*1000+400));
-  playing={timers,bus,lit:null,follow:true};$('playBtn').textContent='■ Stop';
-  if(from>0)stat('Playing from note '+(from+1)+'. Deselect the note (click it again) to play from the start.');
+  if(!sc.parts.some(p=>p.items.length)){stat('Nothing to play yet.');return;}
+  const master=audioOut(),c=ac,out=c.createGain();out.connect(master);
+  const buses=sc.parts.map(p=>{const g=c.createGain(),pan=c.createStereoPanner();g.gain.value=audible(p)?p.vol:0;pan.pan.value=p.pan;g.connect(pan).connect(out);return {g,pan};});
+  const from=startTick();
+  const tl=buildTimeline(from),per=60/sc.bpm/TPQ,t0=c.currentTime+0.15;
+  playing={ev:tl.ev,k:0,t0,out,buses,timers:[],lit:null,follow:true};
+  // notes are set up a little ahead of time, a few at a time, so a long piece starts at once (and the iPad copes)
+  const pump=()=>{const p=playing;if(!p)return;const now=ac.currentTime;
+    while(p.k<p.ev.length&&p.t0+p.ev[p.k].at*per<now+1.2){
+      const e=p.ev[p.k++],at=p.t0+e.at*per;
+      if(e.m!=null)voice(e.m,at,e.d*per*0.97,sc.parts[e.pi].sound,p.buses[e.pi].g);
+      if(e.pi===sc.pi)p.timers.push(setTimeout(()=>{if(playing===p&&sc.pi===e.pi)lightPlaying(e.i);},Math.max(0,(at-ac.currentTime)*1000)));
+    }};
+  pump();playing.loop=setInterval(pump,250);
+  playing.timers.push(setTimeout(stopPlay,(t0+tl.total*per-c.currentTime)*1000+500));
+  $('playBtn').textContent='■ Stop';
+  const n=sc.parts.filter(audible).length;
+  stat((sc.sel>=0?'Playing from note '+(sc.sel+1)+'. ':'')+(sc.parts.length>1?`${n} of ${sc.parts.length} parts sounding. `:'')+(sc.sel>=0?'Deselect the note (click it again) to play from the start.':''));
 }
 
 /* ---- microphone recording ---- */
@@ -958,8 +1146,13 @@ async function readScanPage(i){
   // keep only a compressed picture of the page for showing it
   const dw=Math.min(1500,c.width),base=document.createElement('canvas');
   base.width=dw;base.height=Math.round(c.height*dw/c.width);base.getContext('2d').drawImage(c,0,0,base.width,base.height);
+  if(scan.kind==='pdf'){try{   // the words printed on the page, for the titles of the pieces
+    const pgp=await scan.pdf.getPage(i+1),v1=pgp.getViewport({scale:1}),vp=pgp.getViewport({scale:c.width/v1.width}),tc=await pgp.getTextContent();
+    page.texts=tc.items.filter(t=>t.str&&t.str.trim()).map(t=>{const [x,y]=vp.convertToViewportPoint(t.transform[4],t.transform[5]);return {str:t.str.trim(),size:Math.hypot(t.transform[2],t.transform[3])*vp.scale,x,y};});
+  }catch(e){}}
   const k=dw/c.width;freeCanvas(c);
   const blob=await new Promise(r=>base.toBlob(r,'image/jpeg',0.85));freeCanvas(base);
+  page.no=i;
   return scan.pages[i]={page,blob,k};
 }
 function printedTs(){for(const sp of scan.pages)if(sp)for(const s of sp.page.staves)if(s.ts)return s.ts;return null;}
@@ -994,11 +1187,62 @@ async function showScanPage(i){
     try{await readScanPage(scan.cur);}catch(err){console.error(err);scanInfo('Could not read this page: '+err.message);return;}}
   await drawScanPage(scan.cur);scanInfo(pageSummary(scan.pages[scan.cur]));
 }
-function tsFromBar(t){if(!t)return null;if(t%32===0&&t/16>=6&&t/32<=16)return [t/32,2];if(t%16===0&&t/16<=16)return [t/16,4];if(t%8===0&&t/8<=16)return [t/8,8];return null;}
+function tsFromBar(t){if(!t)return null;if(t%64===0&&t/64>=4&&t/64<=8)return [t/64,1];if(t%32===0&&t/16>=6&&t/32<=16)return [t/32,2];if(t%16===0&&t/16<=16)return [t/16,4];if(t%8===0&&t/8<=16)return [t/8,8];return null;}
+// The parts of a full score: the staves of a system, top to bottom. Their clefs name them.
+const PART_OF={treble:['Treble viol','violin',-0.45],soprano:['Treble viol','violin',-0.45],alto:['Tenor viol','viola',0],tenor:['Tenor viol','viola',0],mezzo:['Tenor viol','viola',0],bass:['Bass viol','cello',0.45]};
+function scanParts(pages){
+  // as many parts as the largest system has staves (pieces for fewer instruments leave the others silent)
+  let n=1;pages.forEach(pg=>pg.staves.forEach(s=>{if(s.elems.length&&s.sysSize>n)n=s.sysSize;}));
+  const clefs=[];
+  for(let k=0;k<n;k++){const cl={};pages.forEach(pg=>pg.staves.forEach(s=>{if(s.pos===k&&s.clefType)cl[s.clefType]=(cl[s.clefType]||0)+1;}));clefs.push(Object.keys(cl).sort((a,b)=>cl[b]-cl[a])[0]||null);}
+  return clefs;
+}
 function addScanned(list){
   const override=$('scKey').checked?st.key:null;
+  const all=scan.pages.map(p=>p&&p.page),pages=list.map(sp=>sp.page);
+  const clefs=scanParts(pages),barT=expectedBar()||barTicks();
+  if(clefs.length<=1){addScannedPart(list,override,barT);return;}
+  // a full score: each staff of a system is a part, read in its own clef
+  stopPlay();
+  // Pieces belong to the whole score: a system starts a new piece when most of its staves show a time signature, or
+  // when most staves of the system before it ended with a final double bar.
+  const systems=[];all.forEach(pg=>{if(!pg)return;const by={};pg.staves.forEach(s=>(by[s.sys]=by[s.sys]||[]).push(s));Object.keys(by).sort((a,b)=>a-b).forEach(k=>systems.push(by[k]));});
+  let prevFinal=true,pieceNo=0;
+  systems.forEach(g=>{const start=prevFinal||g.filter(s=>s.ts).length*2>g.length;if(start)pieceNo++;g.forEach(s=>{s.forceSec=start;s.pieceNo=pieceNo;});prevFinal=g.filter(s=>s.endsFinal).length*2>g.length;});
+  const made=clefs.map((cl,k)=>{
+    const keep=s=>s.pos===k;
+    omrSettle(all.map(pg=>pg&&{...pg,staves:pg.staves.filter(keep)}),cl||st.clef);
+    if(k===clefs.length-1){   // the instruments share each piece's key: take the one most staves of the piece show
+      const by={};all.forEach(pg=>pg&&pg.staves.forEach(s=>{if(s.pieceNo)(by[s.pieceNo]=by[s.pieceNo]||[]).push(s);}));
+      Object.values(by).forEach(g=>{const cnt={};g.forEach(s=>{const v=s.keyFinal!=null?s.keyFinal:s.fifths;cnt[v]=(cnt[v]||0)+1;});const best=+Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];
+        g.forEach(s=>{s.keyFinal=best;if(s.sec)s.sec.k=best;});});
+    }
+    return {cl,keep};
+  }).map(({cl,keep},k)=>{
+    let items=[];pages.forEach(pg=>{items=items.concat(omrItems({...pg,staves:pg.staves.filter(keep)},cl||st.clef,override,barT));});
+    const [name,sound]=PART_OF[cl]||['Part '+(k+1),'viola'],n=clefs.length;
+    return {name,clef:cl==='alto'||cl==='tenor'?null:cl,mainClef:cl,sound,pan:n>1?+(-0.6+1.2*k/(n-1)).toFixed(2):0,items};
+  });
+  made.forEach(m=>{const same=made.filter(x=>x.name===m.name);if(same.length>1)m.name+=' '+(same.indexOf(m)+1);});
+  // with notes already in the score: replace them, or add each part to the part at the same place
+  const fresh=sc.parts.every(p=>!p.items.length)||confirm(`Replace the notes you have with the ${made.length} parts read from the score?\n\nOK replaces them. Cancel adds each part to the end of the part in the same place.`);
+  if(fresh)sc.parts=made.map(m=>Object.assign(newPart(m.name,m.clef,m.sound,m.pan),{mainClef:m.mainClef,items:m.items}));
+  else made.forEach((m,i)=>{const p=sc.parts[i]||(sc.parts[i]=newPart(m.name,m.clef,m.sound,m.pan));p.hist.push(JSON.stringify(p.items));p.items=p.items.concat(m.items);});
+  const ti=sc.parts.findIndex(p=>/Tenor/.test(p.name));sc.pi=ti>=0?ti:0;sc.sel=-1;sc.cur=sc.items.length;
+  if(fresh){
+    const f=pages.flatMap(pg=>pg.staves).find(s=>s.elems.length);
+    const k=f?(f.keyFinal!=null?f.keyFinal:f.fifths):null;
+    if(override==null&&k!=null&&KEYS.some(x=>x[0]===k)){st.key=k;$('key').value=k;refresh();}
+    const ts=(f&&f.pieceTs)||printedTs()||tsFromBar(expectedBar());if(ts){sc.ts=ts;$('tsn').value=ts[0];$('tsd').value=ts[1];}
+  }
+  buildParts();drawRecording();buildFrom();
+  const pieces=sc.items.filter(i=>i.sec).length;
+  stat(`Read ${sc.parts.length} parts from ${scan.name}: ${sc.parts.map(p=>`${p.name} (${p.items.filter(x=>x.m!=null).length} notes)`).join(', ')}.`+
+    (pieces>1?` ${pieces} pieces.`:'')+` Showing the ${part().name} part; the names above switch parts, and M and S mute or solo them.`);
+  $('recscore').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function addScannedPart(list,override,barT){
   omrSettle(scan.pages.map(p=>p&&p.page),st.clef);   // work out each piece's key signature first
-  const barT=expectedBar()||barTicks();
   let items=[];list.forEach(sp=>{items=items.concat(omrItems(sp.page,st.clef,override,barT));});
   if(!items.length){stat('No notes were read from this page.');return;}
   const wasEmpty=!sc.items.length;
@@ -1009,7 +1253,9 @@ function addScanned(list){
     if(override==null&&k!=null&&KEYS.some(x=>x[0]===k)){st.key=k;$('key').value=k;refresh();}
     const ts=(f&&f.pieceTs)||printedTs()||tsFromBar(expectedBar());if(ts){sc.ts=ts;$('tsn').value=ts[0];$('tsd').value=ts[1];}
   }
-  sc.items.splice(sc.cur,0,...items);sc.cur+=items.length;sc.sel=-1;drawRecording();
+  // the clef this part is usually printed in (pieces in another clef are shown in theirs)
+  {const cl={};list.forEach(sp=>sp.page.staves.forEach(s=>{if(s.clefType)cl[s.clefType]=(cl[s.clefType]||0)+1;}));const mc=Object.keys(cl).sort((a,b)=>cl[b]-cl[a])[0];if(mc&&!part().mainClef)part().mainClef=mc;}
+  sc.items.splice(sc.cur,0,...items);sc.cur+=items.length;sc.sel=-1;drawRecording();buildParts();buildFrom();
   const out=items.filter(i=>i.m!=null&&(i.m<OPEN[5]||i.m>OPEN[0]+st.frets)).length;
   const pieces=items.filter(i=>i.sec).length;
   stat((pieces>1?`${pieces} pieces, each with its own key and time signature. `:'')+`Added ${items.filter(i=>i.m!=null).length} notes and ${items.filter(i=>i.m==null).length} rests from ${scan.name}, read in ${$('clef').selectedOptions[0].textContent.split(' (')[0].toLowerCase()}.`+(out?` ${out} notes are outside the frets shown.`:'')+' Click a note in the score to fix it.');
@@ -1030,7 +1276,14 @@ async function loadFile(f){
       const d=JSON.parse(await f.text());
       if(d.app!=='tenor-viol-trainer')throw new Error('not a Tenor Viol Trainer file');
       let items;
-      if(Array.isArray(d.items))items=d.items.filter(i=>typeof i.d==='number'&&(i.m==null||typeof i.m==='number'));
+      const okItem=i=>i&&typeof i.d==='number'&&(i.m==null||typeof i.m==='number');
+      if(Array.isArray(d.parts)&&d.parts.length){   // a score with parts
+        stopPlay();
+        sc.parts=d.parts.map(p=>Object.assign(newPart(String(p.name||'Part'),p.clef||null,INST[p.sound]?p.sound:'viola',+p.pan||0),{vol:p.vol!=null?+p.vol:0.8,mute:!!p.mute,solo:!!p.solo,mainClef:p.mainClef||null,items:(p.items||[]).filter(okItem)}));
+        sc.pi=Math.min(sc.parts.length-1,Math.max(0,d.part|0));if(d.reverb!=null)setReverb(+d.reverb);
+        items=sc.items.slice();sc.items=[];
+      }
+      else if(Array.isArray(d.items))items=d.items.filter(okItem);
       else if(Array.isArray(d.events)){ // first-version recordings
         const k=(d.bpm||60)/60*TPQ,ev=d.events,notes=[];
         ev.forEach((e,i)=>{if(e.m!=null)notes.push({m:e.m,s:e.t*k,e:(i+1<ev.length?ev[i+1].t:(d.end||e.t+1))*k});});
@@ -1052,9 +1305,9 @@ async function loadFile(f){
 
 /* ---- wiring ---- */
 for(let i=1;i<=16;i++){const o=document.createElement('option');o.value=i;o.textContent=i;$('tsn').append(o);}
-[2,4,8,16].forEach(i=>{const o=document.createElement('option');o.value=i;o.textContent=i;$('tsd').append(o);});
+[1,2,4,8,16].forEach(i=>{const o=document.createElement('option');o.value=i;o.textContent=i;$('tsd').append(o);});
 $('tsn').value=4;$('tsd').value=4;
-$('tsn').onchange=$('tsd').onchange=()=>{sc.ts=[+$('tsn').value,+$('tsd').value];if(sc.items[0]&&sc.items[0].sec&&sc.items[0].sec.ts)sc.items[0].sec.ts=sc.ts;drawRecording();};
+$('tsn').onchange=$('tsd').onchange=()=>{sc.ts=[+$('tsn').value,+$('tsd').value];sc.parts.forEach(p=>{if(p.items[0]&&p.items[0].sec&&p.items[0].sec.ts)p.items[0].sec.ts=sc.ts;});drawRecording();};
 $('bpm').onchange=()=>{sc.bpm=Math.max(30,Math.min(240,+$('bpm').value||60));$('bpm').value=sc.bpm;drawRecording();};
 $('title').oninput=()=>{$('rectitle').textContent=$('title').value||'Tenor viol';};
 $('restBtn').onclick=()=>addItem(null);
@@ -1066,15 +1319,22 @@ $('nextBtn').onclick=()=>moveSel(1);
 $('upBtn').onclick=()=>setDur((sc.bi-1+BASES.length)%BASES.length);
 $('downBtn').onclick=()=>setDur((sc.bi+1)%BASES.length);
 $('endBtn').onclick=()=>{sc.sel=-1;sc.cur=sc.items.length;drawRecording();stat('Adding notes at the end.');};
-$('clearBtn').onclick=()=>{if(rec.on)stopRec();stopPlay();snap();sc.items=[];sc.sel=-1;sc.cur=0;drawRecording();stat('Cleared (Undo brings it back).');};
+$('clearBtn').onclick=()=>{if(rec.on)stopRec();stopPlay();
+  if(sc.parts.length>1){sc.parts=[newPart('Tenor viol',null,'viola',0)];sc.pi=0;sc.sel=-1;sc.cur=0;buildParts();drawRecording();stat('Cleared all parts.');return;}
+  snap();sc.items=[];sc.sel=-1;sc.cur=0;drawRecording();buildParts();stat('Cleared (Undo brings it back).');};
 $('playBtn').onclick=playScore;
+$('fromSel').onchange=()=>{const map=barMap(),v=$('fromSel').value,b=v==='start'?null:map[+v];$('fromBar').value=b?b.bar:'';
+  if(sc.sel>=0){const old=sc.sel;sc.sel=-1;paintNote(old,null);}   // a chosen section wins over a selected note
+  if(b){const bars=splitBars(sc.items),first=bars[map.indexOf(b)],idx=first&&first[0]&&first[0].idx,e=idx!=null&&(noteEls.get(idx)||[])[0];if(e)e.closest('svg').scrollIntoView({block:'nearest'});}};
+$('fromBar').onchange=()=>{if(sc.sel>=0){const old=sc.sel;sc.sel=-1;paintNote(old,null);}};
 $('recBtn').onclick=()=>{rec.on?stopRec():startRec();};
 $('impBtn').onclick=()=>$('impFile').click();
 $('impFile').onchange=()=>{const f=$('impFile').files[0];if(f)loadFile(f);$('impFile').value='';};
 $('pdfClose').onclick=()=>{$('pdfref').style.display='none';};
 $('expBtn').onclick=()=>{
   if(rec.on)stopRec();
-  const data={app:'tenor-viol-trainer',version:2,title:$('title').value,key:st.key,clef:st.clef,bpm:sc.bpm,ts:sc.ts,items:sc.items};
+  const data={app:'tenor-viol-trainer',version:3,title:$('title').value,key:st.key,clef:st.clef,bpm:sc.bpm,ts:sc.ts,reverb:sc.reverb,part:sc.pi,
+    parts:sc.parts.map(p=>({name:p.name,clef:p.clef,mainClef:p.mainClef||null,sound:p.sound,vol:p.vol,pan:p.pan,mute:p.mute,solo:p.solo,items:p.items}))};
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,1)],{type:'application/json'}));
   a.download=($('title').value||'tenor-viol-score').replace(/[^\w\- ]+/g,'')+'.json';
@@ -1091,7 +1351,7 @@ addEventListener('keydown',e=>{
   else if(e.key==='Backspace'||e.key==='Delete'){e.preventDefault();delNote();}
   else if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();$('undoBtn').click();}
 });
-buildPalette();buildAnswerUI();setMode();drawRecording();
+buildPalette();buildAnswerUI();setMode();buildParts();drawRecording();
 stat('Pick a rhythm, then click notes on the neck. Click a note in the score to select and edit it.');
 </script>
 </body>
