@@ -9,7 +9,8 @@ Open it here: https://deepspace000.github.io/tenor-viol-trainer/
 - Any key signature, and alto, tenor, octave treble, treble or bass clef.
 - A score you write by tapping the neck: breve, semibreve, minim, crotchet, quaver and semiquaver, with dots, rests, ties across bar lines, any time signature and tempo. Play it back, save it as .json and load it again, or save it as a PDF.
 - Record from a microphone: the notes you play on the viol are written into the score.
-- Import MIDI, MusicXML, or printed music as a PDF or picture. Printed music is read on the page itself: notes, rests, rhythms, dots, ties, bar lines, key and time signature and accidentals.
+- Import MIDI, MusicXML, or printed music as a PDF or picture. Printed music is read on the page itself: notes, rests, rhythms, dots, ties, bar lines, time signature and accidentals. The key signature of each piece is worked out from every staff of the piece and checked against the accidentals in the music; a PDF with several pieces becomes one score with a key and time change at each new piece.
+- Note names and movable-do sol-fa under every note. The note that is playing lights up in the score and on the neck.
 
 Keys: left and right arrows move from note to note in the score, up and down change the rhythm, 1 to 6 pick a rhythm, `.` adds a dot, R adds a rest, Backspace deletes.
 

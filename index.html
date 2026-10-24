@@ -122,6 +122,8 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
       <button id="delBtn" title="Delete the selected note, or the last one entered (Backspace)">Delete note</button>
       <button id="endBtn" title="Go back to adding notes at the end">Add at end</button>
       <button id="clearBtn">Clear all</button>
+      <label><input type="checkbox" id="namesChk" checked> Note names</label>
+      <label><input type="checkbox" id="solfaChk" checked> Sol-fa (movable do)</label>
       <span style="flex:1"></span>
       <button id="impBtn" title="JSON, MIDI, MusicXML, or printed music as a PDF or picture">Import file / PDF…</button>
       <button id="expBtn">Export .json</button>
@@ -164,11 +166,11 @@ button.rec.live{background:#e0302a;animation:pulse 1s infinite}
 </div>
 
 <script src="vexflow.js"></script>
-<script src="omr.js?v=1.0"></script>
+<script src="omr.js?v=1.2"></script>
 <script>
-const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie} = Vex.Flow;
+const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='1.1';
+const APP_VERSION='1.2';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -192,21 +194,31 @@ const pc=m=>((m%12)+12)%12;
 const KEYS=[[0,'C','C major / A minor'],[1,'G','G major / E minor'],[2,'D','D major / B minor'],[3,'A','A major / F♯ minor'],[4,'E','E major / C♯ minor'],[5,'B','B major / G♯ minor'],[6,'F#','F♯ major / D♯ minor'],[7,'C#','C♯ major / A♯ minor'],
  [-1,'F','F major / D minor'],[-2,'Bb','B♭ major / G minor'],[-3,'Eb','E♭ major / C minor'],[-4,'Ab','A♭ major / F minor'],[-5,'Db','D♭ major / B♭ minor'],[-6,'Gb','G♭ major / E♭ minor'],[-7,'Cb','C♭ major / A♭ minor']];
 const SH_ORDER='FCGDAEB',FL_ORDER='BEADGCF',BASE={C:0,D:2,E:4,F:5,G:7,A:9,B:11},LET='CDEFGAB';
-function keyAcc(){const n=st.key,o={};LET.split('').forEach(l=>o[l]=0);
+function keyAcc(n=st.key){const o={};LET.split('').forEach(l=>o[l]=0);
   if(n>0)SH_ORDER.slice(0,n).split('').forEach(l=>o[l]=1);else FL_ORDER.slice(0,-n).split('').forEach(l=>o[l]=-1);return o;}
 const SYM={'-1':'♭','0':'','1':'♯'};
-function spell(m){ // -> {letter, off, oct, name, pcname, inKey, needAcc}
-  const ka=keyAcc(),p=pc(m);let letter=null,off=0,inKey=false;
+const LOF={F:-1,C:0,G:1,D:2,A:3,E:4,B:5};      // place on the line of fifths
+function spell(m,key=st.key){ // -> {letter, off, oct, name, pcname, inKey, needAcc}
+  const ka=keyAcc(key),p=pc(m);let letter=null,off=0,inKey=false;
   for(const l of LET){if(pc(BASE[l]+ka[l])===p){letter=l;off=ka[l];inKey=true;break;}}
   if(!inKey){
-    const nat=LET.split('').find(l=>BASE[l]===p);
-    if(nat){letter=nat;off=0;}
-    else if(st.key>=0){letter=LET.split('').find(l=>BASE[l]===pc(p-1));off=1;}
-    else{letter=LET.split('').find(l=>BASE[l]===pc(p+1));off=-1;}
+    // a note outside the key takes the spelling nearest the key on the line of fifths
+    // (in C: B♭, E♭, F♯, C♯, G♯; in F: B natural, E♭, F♯, C♯)
+    let best=null;
+    for(const l of LET){const o=((p-BASE[l]+18)%12)-6;if(Math.abs(o)>1)continue;
+      const d=Math.abs(LOF[l]+7*o-(key+2));if(!best||d<best.d||(d===best.d&&o>best.o))best={l,o,d};}
+    letter=best.l;off=best.o;
   }
   const oct=Math.floor((m-off)/12)-1;
   const pcname=letter+SYM[off];
   return {letter,off,acc:SYM[off],oct,name:pcname+oct,pcname,inKey,needAcc:off!==ka[letter]};
+}
+// movable do: do is the home note of the major key, so a minor key is la-based
+const SOLFA=['do','re','mi','fa','so','la','ti'],RAISE={do:'di',re:'ri',fa:'fi',so:'si',la:'li'},LOWER={re:'ra',mi:'me',so:'se',la:'le',ti:'te'};
+function solfa(m,key=st.key){
+  const sp=spell(m,key),tonic=KEYS.find(k=>k[0]===key)[1][0];
+  const s=SOLFA[(LET.indexOf(sp.letter)-LET.indexOf(tonic)+7)%7],alt=sp.off-keyAcc(key)[sp.letter];
+  return alt>0?(RAISE[s]||s+'♯'):alt<0?(LOWER[s]||s+'♭'):s;
 }
 KEYS.forEach(k=>{const o=document.createElement('option');o.value=k[0];o.textContent=k[2];$('key').append(o);});
 const allowed=m=>st.acc!=='diatonic'||spell(m).inKey;
@@ -327,6 +339,7 @@ function drawStaff(midis,colors){
   v.addTickables(notes);
   new Formatter().joinVoices([v]).format([v],Math.min(w-140,notes.length*80));
   v.draw(ctx,stave);
+  if(st.mode==='explore')labelNotes(svg,notes,midis.map(m=>({m,key:st.key})),stave);
   notes.forEach((sn,i)=>{const e=sn.getSVGElement&&sn.getSVGElement();if(!e)return;
     e.style.cursor=st.mode==='explore'?'ns-resize':'pointer';
     e.addEventListener('pointerdown',ev=>startDrag(ev,i));});
@@ -457,7 +470,7 @@ function refresh(){buildAnswerUI();setMode();}
 
 $('mode').onchange=setMode;
 $('clef').onchange=()=>{st.clef=$('clef').value;drawRecording();st.mode==='explore'?(drawStaff([]),msg('Clef changed – click a note')):setMode();};
-$('key').onchange=()=>{st.key=+$('key').value;refresh();drawRecording();};
+$('key').onchange=()=>{st.key=+$('key').value;if(sc.items[0]&&sc.items[0].sec)sc.items[0].sec.k=st.key;refresh();drawRecording();};
 $('acc').onchange=()=>{st.acc=$('acc').value;refresh();};
 $('frets').onchange=()=>{st.frets=+$('frets').value;refresh();};
 $('lbl').onchange=()=>{st.labels=$('lbl').checked;drawNeck();};
@@ -480,9 +493,10 @@ const durT=()=>BASES[sc.bi][1]*(2-Math.pow(2,-sc.dots));
 const entryOn=()=>$('entryChk').checked&&st.mode==='explore';
 const stat=t=>{$('recstat').textContent=t;};
 
+function keyAt(i){let k=st.key;for(let j=0;j<=i&&j<sc.items.length;j++){const x=sc.items[j].sec;if(x&&x.k!=null)k=x.k;}return k;}
 function snap(){sc.hist.push(JSON.stringify(sc.items));if(sc.hist.length>100)sc.hist.shift();}
 function addItem(m){snap();sc.items.splice(sc.cur,0,{m,d:durT()});sc.cur++;sc.sel=-1;drawRecording();
-  stat(`${m==null?'Rest':spell(m).name} added (${BASES[sc.bi][3].toLowerCase()}${'·'.repeat(sc.dots)}).`);}
+  stat(`${m==null?'Rest':spell(m,keyAt(sc.cur-1)).name} added (${BASES[sc.bi][3].toLowerCase()}${'·'.repeat(sc.dots)}).`);}
 function setDur(bi){sc.bi=bi;if(sc.sel>=0){snap();sc.items[sc.sel].d=durT();}buildPalette();drawRecording();}
 function setDots(n){sc.dots=n;if(sc.sel>=0){snap();sc.items[sc.sel].d=durT();}buildPalette();drawRecording();}
 function lightNeck(m){st.hl={};positions().filter(p=>p.m===m).forEach(p=>st.hl[p.s+'_'+p.f]='#d9a441');drawNeck();}
@@ -503,11 +517,12 @@ function setSel(i){
   if(noteEls.has(i)&&!rec.on){paintNote(prev,null);paintNote(i,'#1f5fbf');selEl=noteEls.get(i)[0];}
   else drawRecording();
   if(selEl)selEl.scrollIntoView({block:'nearest',inline:'nearest'});
-  stat('Note '+(i+1)+' of '+sc.items.length+(it.m==null?' (rest)':' ('+spell(it.m).name+')')+'. Left/right arrows move between notes, up/down change its rhythm, Delete removes it.');
+  stat('Note '+(i+1)+' of '+sc.items.length+(it.m==null?' (rest)':' ('+spell(it.m,keyAt(i)).name+', '+solfa(it.m,keyAt(i))+')')+'. Left/right arrows move between notes, up/down change its rhythm, Delete removes it.');
 }
 function delNote(){
   const i=sc.sel>=0?sc.sel:sc.cur-1;if(i<0||i>=sc.items.length)return;
-  snap();sc.items.splice(i,1);sc.sel=-1;sc.cur=Math.min(i,sc.items.length);drawRecording();
+  snap();const gone=sc.items[i];if(gone.sec&&sc.items[i+1]&&!sc.items[i+1].sec)sc.items[i+1].sec=gone.sec;
+  sc.items.splice(i,1);sc.sel=-1;sc.cur=Math.min(i,sc.items.length);drawRecording();
 }
 function buildPalette(){
   const D=$('durBtns');D.innerHTML='';
@@ -520,16 +535,27 @@ function buildPalette(){
 
 /* ---- barring ---- */
 const barTicks=()=>sc.ts[0]*(64/sc.ts[1]);
+const keyName=k=>KEYS.find(x=>x[0]===k)[1];
+// Bars carry the key and time signature in force. A note with sec:{k,ts} starts a new piece: it begins a new bar
+// (even if the last bar is short) and can bring a new key and time signature.
 function splitBars(items){
-  const cap=barTicks(),bars=[[]];let used=0;
+  let key=st.key,ts=sc.ts;
+  const bars=[];let bar=null,used=0;
+  const open=sec=>{bar=[];bar.key=key;bar.ts=ts;bar.cap=ts[0]*64/ts[1];bar.sec=sec;bars.push(bar);used=0;};
   items.forEach((it,idx)=>{
+    if(it.sec){
+      const prevKey=key,prevTs=ts;
+      if(it.sec.k!=null)key=it.sec.k;if(it.sec.ts)ts=it.sec.ts;
+      const sec={prevKey,keyChange:key!==prevKey,tsChange:ts[0]!==prevTs[0]||ts[1]!==prevTs[1]};
+      if(bar&&!bar.length){bar.key=key;bar.ts=ts;bar.cap=ts[0]*64/ts[1];bar.sec=sec;}else open(sec);
+    }
+    if(!bar)open(null);
     let rem=it.d;const pieces=[];
     while(rem>0){
-      if(used>=cap){bars.push([]);used=0;}
-      const take=Math.min(rem,cap-used);
-      decomp(take).forEach(p=>{const pc_={m:it.m,d:p,idx};bars[bars.length-1].push(pc_);pieces.push(pc_);});
+      if(used>=bar.cap)open(null);
+      const take=Math.min(rem,bar.cap-used);
+      decomp(take).forEach(p=>{const q={m:it.m,d:p,idx};bar.push(q);pieces.push(q);});
       used+=take;rem-=take;
-      if(take<4&&take>0&&used<cap){}
     }
     if(it.m!=null)for(let k=0;k<pieces.length-1;k++){pieces[k].tieNext=true;pieces[k+1].tiePrev=true;}
   });
@@ -541,62 +567,90 @@ function splitBars(items){
 function viewItems(){return rec.on?sc.items.concat(notesToItems(micNotes())):sc.items;}
 let selEl=null,noteEls=new Map();
 function paintNote(i,col){col=col||'#000';(noteEls.get(i)||[]).forEach(e=>e.querySelectorAll('*').forEach(c=>{if(c.getAttribute('fill')!=='none')c.style.fill=col;if(c.getAttribute('stroke')&&c.getAttribute('stroke')!=='none')c.style.stroke=col;}));}
+const showNames=()=>$('namesChk').checked,showSolfa=()=>$('solfaChk').checked;
+// note name and sol-fa in two rows under the staff, centred on each notehead
+function labelNotes(svg,notes,keys,stave){
+  const rows=[];if(showNames())rows.push('n');if(showSolfa())rows.push('s');
+  if(!rows.length)return;
+  const y0=stave.getYForLine(4)+48;
+  notes.forEach((sn,i)=>{
+    const k=keys[i];if(!k)return;
+    let x;try{x=(sn.getNoteHeadBeginX()+sn.getNoteHeadEndX())/2;}catch(e){x=sn.getAbsoluteX()+6;}
+    rows.forEach((r,ri)=>{
+      const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+      t.setAttribute('x',x.toFixed(1));t.setAttribute('y',(y0+ri*15).toFixed(1));t.setAttribute('text-anchor','middle');
+      t.setAttribute('font-family','Georgia, serif');t.setAttribute('font-size',r==='n'?'12':'11.5');
+      t.setAttribute('fill',r==='n'?'#2a2118':'#8a3b12');if(r==='s')t.setAttribute('font-style','italic');
+      t.textContent=r==='n'?spell(k.m,k.key).pcname:solfa(k.m,k.key);
+      svg.appendChild(t);
+    });
+  });
+}
 function drawRecording(){
   const el=$('recscore');el.innerHTML='';
   $('rectitle').textContent=$('title').value||'Tenor viol';
   const nReal=sc.items.length,bars=splitBars(viewItems());
-  if(!bars.length){el.innerHTML='<div class="ph">Pick a rhythm, then click notes on the neck. They appear here.</div>';return;}
+  if(!bars.length){el.innerHTML='<div class="ph">Pick a rhythm, then click notes on the neck. They appear here.</div>';noteEls=new Map();return;}
   const W=Math.max(340,(el.clientWidth||900)-12);
-  const ksW=Math.abs(st.key)*11+(st.key?8:0),head=50+ksW,tsW=34;
+  const ksW=k=>Math.abs(k)*11+(k?8:0),tsW=34;
   const nw=p=>26+p.d*0.5;
+  // room taken by clef, key and time signature at the start of a line, or by a change of key or time in mid-line
+  const headW=(b,first)=>50+ksW(b.key)+(first||b.sec?tsW:0);
+  const midW=b=>b.sec?ksW(b.key)+(b.sec.keyChange?ksW(b.sec.prevKey):0)+tsW+6:0;
   const sysList=[];let cur={bars:[],bw:[]},used=0;
   bars.forEach((b,bi)=>{
     const bw=Math.max(80,b.reduce((a,p)=>a+nw(p),0)+24);
-    const extra=head+(sysList.length===0?tsW:0);
-    if(cur.bars.length&&used+bw+(cur.bars.length?0:extra)>W-10){sysList.push(cur);cur={bars:[],bw:[]};used=0;}
-    if(!cur.bars.length)used=head+(sysList.length===0?tsW:0);
+    if(cur.bars.length&&used+bw+midW(b)>W-10){sysList.push(cur);cur={bars:[],bw:[]};used=0;}
+    if(!cur.bars.length)used=headW(b,bi===0);else used+=midW(b);
     cur.bars.push(b);cur.bw.push(bw);used+=bw;
   });
   sysList.push(cur);
   const vfClef=st.clef==='treble8'?'treble':st.clef,shift=st.clef==='treble8'?1:0;
-  const keyName=KEYS.find(k=>k[0]===st.key)[1];
   const restKey={alto:'c/4',tenor:'a/3',treble:'b/4',treble8:'b/4',bass:'d/3'}[st.clef]||'b/4';
-  const tsStr=sc.ts[0]+'/'+sc.ts[1];
-  const allNotes=[];            // {sn,piece,sys}
+  const labelled=showNames()||showSolfa();
+  const H=200+(showNames()?16:0)+(showSolfa()?16:0);
+  const allNotes=[];
   const sysCtx=[];
+  let gb=0;   // index of the bar in the whole score
   sysList.forEach((sys,si)=>{
     const div=document.createElement('div');el.append(div);
-    const H=200,r=new Renderer(div,Renderer.Backends.SVG);r.resize(W,H);const ctx=r.getContext();sysCtx.push(ctx);
-    const first=head+(si===0?tsW:0);
-    const bodyAvail=W-10-first,sum=sys.bw.reduce((a,b)=>a+b,0);
+    const r=new Renderer(div,Renderer.Backends.SVG);r.resize(W,H);const ctx=r.getContext();sysCtx.push(ctx);
+    const svg=div.querySelector('svg');
+    const extra=sys.bars.map((b,bi)=>bi===0?headW(b,si===0):midW(b));
+    const bodyAvail=W-10-extra.reduce((a,b)=>a+b,0),sum=sys.bw.reduce((a,b)=>a+b,0);
     let scale=bodyAvail/sum;if(si===sysList.length-1)scale=Math.min(scale,1.5);
     let x=5;
     sys.bars.forEach((bar,bi)=>{
-      const isFirst=bi===0,width=sys.bw[bi]*scale+(isFirst?first:0);
+      const isFirst=bi===0,width=sys.bw[bi]*scale+extra[bi],next=bars[gb+1];
       const stave=new Stave(x,50,width);
       if(isFirst){if(st.clef==='treble8')stave.addClef('treble','default','8vb');else stave.addClef(st.clef);
-        stave.addKeySignature(keyName);if(si===0)stave.addTimeSignature(tsStr);}
+        stave.addKeySignature(keyName(bar.key));if(gb===0||bar.sec)stave.addTimeSignature(bar.ts[0]+'/'+bar.ts[1]);}
+      else if(bar.sec){stave.addKeySignature(keyName(bar.key),bar.sec.keyChange?keyName(bar.sec.prevKey):undefined);stave.addTimeSignature(bar.ts[0]+'/'+bar.ts[1]);}
+      if(!next)stave.setEndBarType(Barline.type.END);else if(next.sec)stave.setEndBarType(Barline.type.DOUBLE);   // a double bar before each new piece
       stave.setContext(ctx).draw();
+      const kn=keyName(bar.key),labels=[];
       const notes=bar.map(p=>{
         const rp=repOf(p.d),dur=BASES[rp.bi][2]+'d'.repeat(rp.d)+(p.m==null?'r':'');
         let sn;
         if(p.m==null)sn=new StaveNote({keys:[restKey],duration:dur,clef:vfClef});
-        else{const sp=spell(p.m);
+        else{const sp=spell(p.m,bar.key);
           sn=new StaveNote({keys:[sp.letter.toLowerCase()+(sp.off>0?'#':sp.off<0?'b':'')+'/'+(sp.oct+shift)],duration:dur,clef:vfClef});}
         for(let k=0;k<rp.d;k++)Dot.buildAndAttach([sn],{all:true});
         const col=p.idx===sc.sel?'#1f5fbf':(p.idx>=nReal?'#c0392b':null);
         if(col)sn.setStyle({fillStyle:col,strokeStyle:col});
         allNotes.push({sn,p,si});
+        labels.push(p.m!=null&&!p.tiePrev?{m:p.m,key:bar.key}:null);   // a tied-on part of a note is not named again
         return sn;});
       let beams=[];try{beams=Beam.generateBeams(notes);}catch(e){}
       const v=new Voice({num_beats:Math.max(1,bar.reduce((a,p)=>a+p.d,0)/TPQ),beat_value:4}).setStrict(false);
       v.addTickables(notes);
-      Accidental.applyAccidentals([v],keyName);
+      Accidental.applyAccidentals([v],kn);
       new Formatter().joinVoices([v]).format([v],Math.max(40,x+width-stave.getNoteStartX()-14));
       v.draw(ctx,stave);beams.forEach(b=>b.setContext(ctx).draw());
-      x+=width;
+      if(labelled)labelNotes(svg,notes,labels,stave);
+      x+=width;gb++;
     });
-    const svg=div.querySelector('svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.style.width='100%';svg.style.height='auto';
+    svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.style.width='100%';svg.style.height='auto';
   });
   // ties
   allNotes.forEach((a,i)=>{
@@ -613,6 +667,7 @@ function drawRecording(){
     if(!noteEls.has(a.p.idx))noteEls.set(a.p.idx,[]);noteEls.get(a.p.idx).push(e);
     if(a.p.idx===sc.sel&&!selEl)selEl=e;
     e.style.cursor='pointer';e.addEventListener('click',()=>selectItem(a.p.idx));});
+  if(playing&&playing.lit!=null)paintNote(playing.lit,'#e08a00');
 }
 
 /* ---- playback ---- */
@@ -626,10 +681,19 @@ function tone(m,t,len,dest){
   lp.connect(g).connect(dest||ac.destination);
 }
 let playing=null;
+// the note that is sounding lights up in the score (orange) and on the neck
+function lightPlaying(i){
+  if(!playing)return;
+  if(playing.lit!=null)paintNote(playing.lit,playing.lit===sc.sel?'#1f5fbf':null);
+  playing.lit=i;paintNote(i,'#e08a00');
+  const it=sc.items[i];if(it.m!=null)lightNeck(it.m);else{st.hl={};drawNeck();}
+  const e=(noteEls.get(i)||[])[0];if(e)e.scrollIntoView({block:'nearest',inline:'nearest'});
+}
 function stopPlay(){
   if(!playing)return;
   playing.timers.forEach(clearTimeout);
   try{playing.bus.gain.cancelScheduledValues(0);playing.bus.gain.setValueAtTime(0,ac.currentTime);}catch(e){}
+  if(playing.lit!=null)paintNote(playing.lit,playing.lit===sc.sel?'#1f5fbf':null);
   playing=null;$('playBtn').textContent='▶ Play';st.hl={};drawNeck();
 }
 function playScore(){
@@ -637,14 +701,16 @@ function playScore(){
   if(!sc.items.length){stat('Nothing to play yet.');return;}
   audioCtx();
   const bus=ac.createGain();bus.connect(ac.destination);
-  const per=60/sc.bpm/TPQ,timers=[];let t=ac.currentTime+0.15;
-  sc.items.forEach(it=>{
-    const len=it.d*per;
-    if(it.m!=null){tone(it.m,t,len*0.97,bus);timers.push(setTimeout(()=>lightNeck(it.m),(t-ac.currentTime)*1000));}
+  const per=60/sc.bpm/TPQ,timers=[],from=sc.sel>=0?sc.sel:0;let t=ac.currentTime+0.15;
+  for(let i=from;i<sc.items.length;i++){
+    const it=sc.items[i],len=it.d*per;
+    if(it.m!=null)tone(it.m,t,len*0.97,bus);
+    timers.push(setTimeout(()=>lightPlaying(i),(t-ac.currentTime)*1000));
     t+=len;
-  });
+  }
   timers.push(setTimeout(stopPlay,(t-ac.currentTime)*1000+400));
-  playing={timers,bus};$('playBtn').textContent='■ Stop';
+  playing={timers,bus,lit:null};$('playBtn').textContent='■ Stop';
+  if(from>0)stat('Playing from note '+(from+1)+'. Deselect the note (click it again) to play from the start.');
 }
 
 /* ---- microphone recording ---- */
@@ -770,29 +836,36 @@ function parseXml(text){
   const doc=new DOMParser().parseFromString(text,'application/xml');
   if(doc.querySelector('parsererror'))throw new Error('not valid XML');
   const part=doc.querySelector('part');if(!part)throw new Error('no <part> found (only score-partwise MusicXML is supported)');
-  let div=1,ts=null,key=null,bpm=null,voice=null;const items=[];
+  let div=1,ts=null,key=null,bpm=null,voice=null,pend=null;const items=[];
+  const push=it=>{if(pend){it.sec=pend;pend=null;}items.push(it);};
   const txt=(e,s)=>{const x=e.querySelector(s);return x?x.textContent.trim():null;};
   for(const meas of Array.from(part.children).filter(c=>c.tagName==='measure')){
     for(const c of Array.from(meas.children)){
       const nm=c.tagName;
       if(nm==='attributes'){
         if(txt(c,'divisions'))div=+txt(c,'divisions');
-        if(txt(c,'key > fifths')!=null)key=+txt(c,'key > fifths');
-        if(txt(c,'time > beats')&&!ts)ts=[+txt(c,'time > beats'),+txt(c,'time > beat-type')];
+        const kf=txt(c,'key > fifths'),tb=txt(c,'time > beats');
+        if(items.length){   // a change of key or time part-way: the next note starts a new section
+          if(kf!=null){pend=pend||{};pend.k=+kf;}
+          if(tb){pend=pend||{};pend.ts=[+tb,+txt(c,'time > beat-type')];}
+        }else{
+          if(kf!=null)key=+kf;
+          if(tb&&!ts)ts=[+tb,+txt(c,'time > beat-type')];
+        }
       }else if(nm==='direction'||nm==='sound'){
         const s=nm==='sound'?c:c.querySelector('sound');if(s&&s.getAttribute('tempo')&&bpm==null)bpm=+s.getAttribute('tempo');
-      }else if(nm==='forward'){items.push({m:null,d:Math.round(+txt(c,'duration')*TPQ/div)});}
+      }else if(nm==='forward'){push({m:null,d:Math.round(+txt(c,'duration')*TPQ/div)});}
       else if(nm==='backup'){break;}
       else if(nm==='note'){
         if(c.querySelector('grace')||c.querySelector('chord'))continue;
         const v=txt(c,'voice');if(voice==null)voice=v;if(v!=null&&v!==voice)continue;
         const d=Math.round(+txt(c,'duration')*TPQ/div);if(!d)continue;
-        if(c.querySelector('rest')){items.push({m:null,d});continue;}
+        if(c.querySelector('rest')){push({m:null,d});continue;}
         const step=txt(c,'pitch > step'),oct=+txt(c,'pitch > octave'),alt=+(txt(c,'pitch > alter')||0);
         if(!step)continue;
         const m=12*(oct+1)+BASE[step]+Math.round(alt);
         const stop=c.querySelector('tie[type="stop"]'),prev=items[items.length-1];
-        if(stop&&prev&&prev.m===m)prev.d+=d;else items.push({m,d});
+        if(stop&&prev&&prev.m===m)prev.d+=d;else push({m,d});
       }
     }
   }
@@ -870,6 +943,7 @@ async function drawScanPage(i){
   else img=await new Promise((res,rej)=>{const u=URL.createObjectURL(sp.blob),m=new Image();m.onload=()=>{URL.revokeObjectURL(u);res(m);};m.onerror=rej;m.src=u;});
   const cv=$('scCanvas');cv.width=img.width;cv.height=img.height;
   const x=cv.getContext('2d');x.drawImage(img,0,0);if(img.close)img.close();
+  omrSettle(scan.pages.map(p=>p&&p.page),st.clef);   // keys and pieces, from every page read so far
   x.save();x.scale(sp.k,sp.k);omrDrawOverlay(x,sp.page,expectedBar());x.restore();
 }
 function pageSummary(sp){
@@ -877,8 +951,13 @@ function pageSummary(sp){
   pg.staves.forEach(s=>{s.elems.forEach(e=>e.kind==='note'?notes++:rests++);bars+=Math.max(0,s.barX.length-1);
     if(ex)for(let b=1;b<s.barX.length;b++)if(s.totals[b]!=null&&Math.round(s.totals[b])!==ex)bad++;});
   if(!pg.staves.length)return 'No staves found on this page.';
-  const f=pg.staves.find(s=>s.elems.length)||pg.staves[0],kname=(KEYS.find(k=>k[0]===f.fifths)||KEYS[0])[2];
-  return `${pg.staves.length} staves, ${notes} notes, ${rests} rests. Key signature read as ${kname}.`+(ex?` Bars hold ${ex/16} crotchets`+(bad?`; ${bad} bars don't add up (shaded red), check those.`:'.'):'');
+  // the key signature of each piece on the page, and how many staves had to be corrected
+  const keys=[];pg.staves.forEach(s=>{const k=s.keyFinal!=null?s.keyFinal:s.fifths;if(!keys.length||keys[keys.length-1]!==k||s.sec)keys.push(k);});
+  const kdesc=k=>(k===0?'no sharps or flats':Math.abs(k)+(k>0?' sharp':' flat')+(Math.abs(k)>1?'s':''))+' ('+(KEYS.find(x=>x[0]===k)||KEYS[0])[2]+')';
+  const fixed=pg.staves.filter(s=>s.keyFinal!=null&&s.keyFinal!==s.fifths).length,fromNotes=pg.staves.some(s=>s.keyFromNotes);
+  return `${pg.staves.length} staves, ${notes} notes, ${rests} rests. Key signature: ${[...new Set(keys)].map(kdesc).join(', then ')}.`+
+    (fixed?` ${fixed} staff${fixed>1?'s were':' was'} misread and corrected from the rest of the piece${fromNotes?' and its accidentals':''}.`:'')+
+    (ex?` Bars hold ${ex/16} crotchets`+(bad?`; ${bad} bars don't add up (shaded red), check those.`:'.'):'');
 }
 async function showScanPage(i){
   scan.cur=Math.max(0,Math.min(scan.n-1,i));
@@ -890,6 +969,7 @@ async function showScanPage(i){
 function tsFromBar(t){if(!t)return null;if(t%32===0&&t/16>=6&&t/32<=16)return [t/32,2];if(t%16===0&&t/16<=16)return [t/16,4];if(t%8===0&&t/8<=16)return [t/8,8];return null;}
 function addScanned(list){
   const override=$('scKey').checked?st.key:null;
+  omrSettle(scan.pages.map(p=>p&&p.page),st.clef);   // work out each piece's key signature first
   const barT=expectedBar()||barTicks();
   let items=[];list.forEach(sp=>{items=items.concat(omrItems(sp.page,st.clef,override,barT));});
   if(!items.length){stat('No notes were read from this page.');return;}
@@ -897,12 +977,14 @@ function addScanned(list){
   snap();
   if(wasEmpty){
     const f=list.map(sp=>sp.page.staves.find(s=>s.elems.length)).find(Boolean);
-    if(override==null&&f&&KEYS.some(k=>k[0]===f.fifths)){st.key=f.fifths;$('key').value=f.fifths;refresh();}
-    const ts=printedTs()||tsFromBar(expectedBar());if(ts){sc.ts=ts;$('tsn').value=ts[0];$('tsd').value=ts[1];}
+    const k=f?(f.keyFinal!=null?f.keyFinal:f.fifths):null;
+    if(override==null&&k!=null&&KEYS.some(x=>x[0]===k)){st.key=k;$('key').value=k;refresh();}
+    const ts=(f&&f.pieceTs)||printedTs()||tsFromBar(expectedBar());if(ts){sc.ts=ts;$('tsn').value=ts[0];$('tsd').value=ts[1];}
   }
   sc.items.splice(sc.cur,0,...items);sc.cur+=items.length;sc.sel=-1;drawRecording();
   const out=items.filter(i=>i.m!=null&&(i.m<OPEN[5]||i.m>OPEN[0]+st.frets)).length;
-  stat(`Added ${items.filter(i=>i.m!=null).length} notes and ${items.filter(i=>i.m==null).length} rests from ${scan.name}, read in ${$('clef').selectedOptions[0].textContent.split(' (')[0].toLowerCase()}.`+(out?` ${out} notes are outside the frets shown.`:'')+' Click a note in the score to fix it.');
+  const pieces=items.filter(i=>i.sec).length;
+  stat((pieces>1?`${pieces} pieces, each with its own key and time signature. `:'')+`Added ${items.filter(i=>i.m!=null).length} notes and ${items.filter(i=>i.m==null).length} rests from ${scan.name}, read in ${$('clef').selectedOptions[0].textContent.split(' (')[0].toLowerCase()}.`+(out?` ${out} notes are outside the frets shown.`:'')+' Click a note in the score to fix it.');
   $('recscore').scrollIntoView({behavior:'smooth',block:'center'});
 }
 $('scPrev').onclick=()=>showScanPage(scan.cur-1);
@@ -944,10 +1026,11 @@ async function loadFile(f){
 for(let i=1;i<=16;i++){const o=document.createElement('option');o.value=i;o.textContent=i;$('tsn').append(o);}
 [2,4,8,16].forEach(i=>{const o=document.createElement('option');o.value=i;o.textContent=i;$('tsd').append(o);});
 $('tsn').value=4;$('tsd').value=4;
-$('tsn').onchange=$('tsd').onchange=()=>{sc.ts=[+$('tsn').value,+$('tsd').value];drawRecording();};
+$('tsn').onchange=$('tsd').onchange=()=>{sc.ts=[+$('tsn').value,+$('tsd').value];if(sc.items[0]&&sc.items[0].sec&&sc.items[0].sec.ts)sc.items[0].sec.ts=sc.ts;drawRecording();};
 $('bpm').onchange=()=>{sc.bpm=Math.max(30,Math.min(240,+$('bpm').value||60));$('bpm').value=sc.bpm;drawRecording();};
 $('title').oninput=()=>{$('rectitle').textContent=$('title').value||'Tenor viol';};
 $('restBtn').onclick=()=>addItem(null);
+$('namesChk').onchange=$('solfaChk').onchange=()=>{drawRecording();drawStaff(st.show||[]);};
 $('undoBtn').onclick=()=>{if(!sc.hist.length)return;sc.items=JSON.parse(sc.hist.pop());sc.sel=-1;sc.cur=sc.items.length;drawRecording();};
 $('delBtn').onclick=delNote;
 $('prevBtn').onclick=()=>moveSel(-1);

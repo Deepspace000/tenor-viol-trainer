@@ -170,9 +170,14 @@ function analyzeBitmap(imgData, opts){
       comps.push({ minx, maxx, miny, maxy, w: maxx - minx + 1, h: maxy - miny + 1, area, pix });
     }
     const clef = comps.filter(c => c.h > 4 * p).sort((a, b) => a.minx - b.minx)[0];
-    const zone = clef ? clef.maxx + 0.15 * p : st.left + 2.8 * p;
+    // a C clef is a tall bar plus two curls that come out as separate shapes; they belong to the clef too
+    // (otherwise the two curls look like the stacked numbers of a time signature)
+    let clefRight = clef ? clef.maxx : 0;
+    if (clef) for (const c of comps) if (c.minx < clef.minx + 2.7 * p && c.maxx < clef.minx + 3.2 * p && c.maxx > clefRight) clefRight = c.maxx;
+    const zone = clef ? clefRight + 0.15 * p : st.left + 2.8 * p;
+    st.clefRight = clef ? clefRight : null;
     const cands = comps.filter(c => c.minx >= zone && c.h >= 2.15 * p && c.h <= 3.4 * p && c.w >= 0.35 * p && c.w <= 1.05 * p).sort((a, b) => a.minx - b.minx);
-    let sharps = 0, flats = 0, lastX = -1;
+    let lastX = -1; const keyAccs = [];
     for (const c of cands) {
       if (lastX >= 0 && c.minx - lastX > 1.4 * p) break;                       // past the key signature
       const paired = comps.some(o => o !== c && Math.min(o.maxx, c.maxx) - Math.max(o.minx, c.minx) > 0.5 * c.w && (o.miny > c.maxy || o.maxy < c.miny) && Math.abs((o.miny > c.maxy ? o.miny - c.maxy : c.miny - o.maxy)) < 0.6 * p);
@@ -180,9 +185,11 @@ function analyzeBitmap(imgData, opts){
       // sharp: a stroke runs nearly the full height in the right third of the glyph. Flat: only the loop is there.
       const colH = new Uint16Array(c.w); for (const q of c.pix) colH[(q % W) - c.minx]++;
       let mx = 0; for (let k = Math.round(c.w * 0.65); k < c.w; k++) if (colH[k] > mx) mx = colH[k];
-      if (mx >= 0.72 * c.h) sharps++; else flats++;
+      keyAccs.push({ minx: c.minx, maxx: c.maxx, miny: c.miny, maxy: c.maxy, type: mx >= 0.72 * c.h ? 1 : -1 });
       lastX = c.maxx;
     }
+    st.keyAccs = keyAccs;     // checked again once the notes are known: the first note's own sharp can sit here too
+    const sharps = keyAccs.filter(a => a.type > 0).length, flats = keyAccs.length - sharps;
     st.key = sharps >= flats ? { type: 'sharp', n: sharps } : { type: 'flat', n: flats };
     {
       const afterKey = lastX >= 0 ? lastX : zone; let ms = afterKey;
@@ -550,7 +557,19 @@ function omrReadPage(imgData) {
   res.staves.forEach((st, si) => {
     const p = st.p;
     if (st.musicStart == null) st.musicStart = st.left + 4 * p;
-    const fifths = st.key ? (st.key.type === 'sharp' ? st.key.n : -st.key.n) : 0;
+    // A sharp or flat right up against a note is that note's own accidental, not part of the key signature
+    // (it happens when a line starts with an altered note and there is no key signature).
+    const accs = (st.keyAccs || []).slice(); let dropped = null;
+    const onStaff = res.notes.filter(n => n.staff === si);
+    while (accs.length) {
+      const c = accs[accs.length - 1];
+      const own = onStaff.some(n => { const gap = n.x - (n.w || p) / 2 - c.maxx; return gap >= -0.3 * p && gap <= 0.9 * p && n.y >= c.miny - 0.3 * p && n.y <= c.maxy + 0.3 * p; });
+      if (!own) break;
+      dropped = accs.pop();
+    }
+    if (dropped) st.musicStart = Math.min(st.musicStart, dropped.minx - 0.2 * p);
+    const nSharp = accs.filter(a => a.type > 0).length;
+    const fifths = accs.length ? (nSharp >= accs.length - nSharp ? 1 : -1) * accs.length : 0;
     // nothing before the music starts: the flats of a key signature have round bowls like little notes
     const mine = res.notes.filter(n => n.staff === si && n.x > st.musicStart - 0.2 * p);
     // a square breve on a ledger line: the line splits its middle, so look for its two thick bars directly
@@ -633,6 +652,9 @@ function omrReadPage(imgData) {
     const bars = [];
     for (const x of cols) { const last = bars[bars.length - 1]; if (last && x - last.x1 <= 2 * LT + 2) last.x1 = x; else bars.push({ x0: x, x1: x }); }
     const barX = []; for (const b of bars) { const x = (b.x0 + b.x1) / 2; if (!barX.length || x - barX[barX.length - 1] > 0.9 * p) barX.push(x); }
+    // a thick bar line at the very end of the line closes a piece
+    const lastBar = bars[bars.length - 1];
+    const endsFinal = !!lastBar && lastBar.x1 - lastBar.x0 + 1 >= 0.3 * p && lastBar.x1 >= st.right - 0.8 * p;
 
     // ---------- rests ----------
     const y0 = Math.max(0, Math.round(st.top - 0.35 * p)), y1 = Math.min(H - 1, Math.round(st.bot + 0.35 * p));
@@ -699,7 +721,7 @@ function omrReadPage(imgData) {
       const b = omrReadNumber(clean, W, H, st.tsBox[0] - 2, st.tsBox[1] + 2, Math.round(st.top + 2.15 * p), Math.round(st.bot + 0.2 * p));
       if (a && a <= 16 && [1, 2, 4, 8, 16].includes(b)) ts = [a, b];
     }
-    out.staves.push({ p, left: st.left, right: st.right, top: st.top, bot: st.bot, fifths, musicStart: st.musicStart, barX, elems, totals, acc, ts });
+    out.staves.push({ p, left: st.left, right: st.right, top: st.top, bot: st.bot, fifths, keyBox: accs.length ? [accs[0].minx, accs[accs.length - 1].maxx] : null, droppedAcc: !!dropped, musicStart: st.musicStart, barX, elems, totals, acc, ts, endsFinal });
   });
   return out;
 }
@@ -734,19 +756,70 @@ function omrReadNumber(bin, W, H, x0, x1, y0, y1) {
   return bestS > 0.35 ? best : null;
 }
 
-// Turns one page's elements into score items. clef: 'alto' etc. fifths: null to use what was read from the page.
-// barT: ticks in a bar, for rests that last several bars.
+const omrKeyOff = f => { const o = {}; OMR_LET.split('').forEach(l => o[l] = 0); if (f > 0) OMR_SHARPS.slice(0, f).split('').forEach(l => o[l] = 1); else if (f < 0) OMR_FLATS.slice(0, -f).split('').forEach(l => o[l] = -1); return o; };
+
+// Works out the key signature of each piece from every staff read so far, in page order. A piece starts at a time
+// signature or after a final double bar line. Every staff of a piece carries the same key signature, so a staff that
+// disagrees with the staves around it was misread. Then the sharps, flats and naturals written in the music are checked:
+// with the right key signature hardly any of them are pointless (a natural on a note the key leaves natural, a flat on a
+// note the key already flattens). Sets keyFinal on every staff, and sec on the first staff of each piece.
+function omrSettle(pages, clef) {
+  const topDia = OMR_TOPDIA[clef] || 32, rows = [];
+  pages.forEach(pg => { if (pg) pg.staves.forEach(s => rows.push(s)); });
+  // pieces from time signatures and final bar lines
+  let pieces = [], cur = null, prevFinal = true;
+  for (const s of rows) { if (!cur || s.ts || prevFinal) { cur = { staves: [], ts: s.ts || null }; pieces.push(cur); } cur.staves.push(s); prevFinal = !!s.endsFinal; }
+  // inside a piece: a lone staff that disagrees with its neighbours takes theirs; a lasting change starts a new piece
+  const split = [];
+  for (const pc of pieces) {
+    const k = pc.staves.map(s => s.fifths);
+    for (let i = 0; i < k.length; i++) {
+      const a = i > 0 ? k[i - 1] : null, b = i + 1 < k.length ? k[i + 1] : null;
+      if (k[i] !== a && k[i] !== b && (a === b ? a != null : (a == null ? b != null && k[i + 2] === b : b == null && k[i - 2] === a))) k[i] = a != null ? a : b;
+    }
+    let part = null;
+    pc.staves.forEach((s, i) => { if (!part || k[i] !== part.key) { part = { staves: [], ts: part ? null : pc.ts, key: k[i] }; split.push(part); } part.staves.push(s); });
+  }
+  // the music's own accidentals as a second opinion
+  for (const pc of split) {
+    const pointless = f => {
+      const ko = omrKeyOff(f); let n = 0, all = 0;
+      for (const s of pc.staves) { let bar = -1, carry = {}, before = {};
+        for (const e of s.elems) {
+          if (e.bar !== bar) { bar = e.bar; before = carry; carry = {}; }
+          if (e.kind !== 'note' || e.accOff == null) continue;
+          const dia = topDia - e.step, letter = OMR_LET[((dia % 7) + 7) % 7];
+          const now = carry[dia] != null ? carry[dia] : ko[letter];
+          all++; if (e.accOff === now && before[dia] == null) n++;       // (a reminder after last bar's change is fine)
+          carry[dia] = e.accOff;
+        } }
+      return { n, all };
+    };
+    const here = pointless(pc.key);
+    pc.check = here;
+    if (here.n >= 3 && here.n >= 0.3 * here.all) {
+      for (const f of [pc.key - 1, pc.key + 1]) { if (f < -7 || f > 7) continue; const t = pointless(f); if (t.n <= here.n / 3) { pc.key = f; pc.keyFromNotes = true; pc.check = t; break; } }
+    }
+  }
+  let lastTs = null;
+  for (const pc of split) { if (pc.ts) lastTs = pc.ts; pc.staves.forEach((s, i) => { s.keyFinal = pc.key; s.secTs = pc.ts; s.pieceTs = lastTs; s.sec = i === 0 ? { k: pc.key, ts: pc.ts } : null; s.keyFromNotes = !!pc.keyFromNotes; }); }
+  return split;
+}
+
+// Turns one page's elements into score items. clef: 'alto' etc. fifths: null to use the key signature worked out for each
+// piece (omrSettle). barT: ticks in a bar, for rests that last several bars when no time signature was read.
+// The first note of each piece carries sec: {k, ts} so that the score can show the new key and time signature.
 function omrItems(page, clef, fifthsOverride, barT) {
   const items = [], topDia = OMR_TOPDIA[clef] || 32;
   let tied = null;                                   // the item a tie is still holding on to, even across lines
   for (const st of page.staves) {
-    const f = fifthsOverride != null ? fifthsOverride : st.fifths;
-    const keyOff = {}; OMR_LET.split('').forEach(l => keyOff[l] = 0);
-    if (f > 0) OMR_SHARPS.slice(0, f).split('').forEach(l => keyOff[l] = 1); else if (f < 0) OMR_FLATS.slice(0, -f).split('').forEach(l => keyOff[l] = -1);
+    const f = fifthsOverride != null ? fifthsOverride : st.keyFinal != null ? st.keyFinal : st.fifths;
+    const keyOff = omrKeyOff(f), bt = st.secTs ? st.secTs[0] * 64 / st.secTs[1] : barT;
+    const start = items.length;
     let bar = -1, carry = {};
     for (const e of st.elems) {
       if (e.bar !== bar) { bar = e.bar; carry = {}; }
-      if (e.kind === 'rest') { items.push({ m: null, d: e.multi ? e.multi * (barT || 64) : e.d }); tied = null; continue; }
+      if (e.kind === 'rest') { items.push({ m: null, d: e.multi ? e.multi * (bt || 64) : e.d }); tied = null; continue; }
       const dia = topDia - e.step, letter = OMR_LET[((dia % 7) + 7) % 7], oct = Math.floor(dia / 7);
       if (tied && tied.dia === dia) { tied.item.d += Math.round(e.d); if (!e.tie) tied = null; continue; }   // a tied note just lengthens the first one
       let off = keyOff[letter];
@@ -755,6 +828,7 @@ function omrItems(page, clef, fifthsOverride, barT) {
       items.push(item);
       tied = e.tie ? { item, dia } : null;
     }
+    if (st.sec && items.length > start) items[start].sec = { k: fifthsOverride != null ? fifthsOverride : st.sec.k, ts: st.sec.ts };
   }
   return items;
 }
@@ -773,8 +847,14 @@ function omrDrawOverlay(ctx, page, expectBar) {
   const NAME = { 128: 'B', 64: 'S', 32: 'M', 16: 'C', 8: 'Q', 4: 'q' };
   ctx.lineWidth = Math.max(2, page.U * 0.12); ctx.textAlign = 'center';
   for (const st of page.staves) {
-    const p = st.p;
-    st.barX.forEach((x, i) => { const bad = expectBar && st.totals[i] != null && i >= 1 && Math.round(st.totals[i]) !== expectBar; ctx.strokeStyle = 'rgba(0,150,0,.55)'; ctx.beginPath(); ctx.moveTo(x, st.top - 0.4 * p); ctx.lineTo(x, st.bot + 0.4 * p); ctx.stroke();
+    const p = st.p, exp = st.pieceTs ? st.pieceTs[0] * 64 / st.pieceTs[1] : expectBar;
+    // the key signature worked out for this staff (and whether this staff starts a piece)
+    const kf = st.keyFinal != null ? st.keyFinal : st.fifths, fixed = kf !== st.fifths;
+    ctx.font = `bold ${Math.round(p * 0.8)}px sans-serif`; ctx.textAlign = 'left';
+    ctx.fillStyle = fixed ? '#c62828' : '#6a1b9a';
+    ctx.fillText((st.sec ? 'New piece · ' : '') + 'Key: ' + (kf === 0 ? 'none' : Math.abs(kf) + (kf > 0 ? ' sharp' : ' flat') + (Math.abs(kf) > 1 ? 's' : '')) + (fixed ? ' (corrected)' : '') + (st.sec && st.sec.ts ? ' · ' + st.sec.ts.join('/') : ''), st.left, st.top - 2.6 * p);
+    ctx.textAlign = 'center';
+    st.barX.forEach((x, i) => { const bad = exp && st.totals[i] != null && i >= 1 && Math.round(st.totals[i]) !== exp; ctx.strokeStyle = 'rgba(0,150,0,.55)'; ctx.beginPath(); ctx.moveTo(x, st.top - 0.4 * p); ctx.lineTo(x, st.bot + 0.4 * p); ctx.stroke();
       if (i >= 1 && bad) { ctx.fillStyle = 'rgba(220,0,0,.14)'; ctx.fillRect(st.barX[i - 1], st.top - 0.4 * p, x - st.barX[i - 1], st.bot - st.top + 0.8 * p); } });
     ctx.font = `bold ${Math.round(p * 0.9)}px sans-serif`;
     for (const e of st.elems) {
