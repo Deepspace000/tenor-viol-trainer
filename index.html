@@ -254,6 +254,7 @@ span.pname{min-width:0;color:#6e4f28}
     <label title="Tuned G C F A D G (G2 to G4)"><input type="checkbox" class="neckChk" value="tenor" checked> Tenor viol</label>
     <label title="Tuned D G C E A D (D2 to D4)"><input type="checkbox" class="neckChk" value="bass"> Bass viol</label>
     <span class="score" id="neckHint"></span>
+    <label title="How your tenor viol is tuned: the tenor neck, the drills and the exercises follow it">Tenor viol tuned <select id="tuneSel"><option value="G">G C F A D G (the usual)</option><option value="E">E A D F♯ B E (a minor third lower)</option></select></label>
     <label title="Where a note lights up on the neck">Notes shown <select id="placeSel"><option value="all">low and high (every place)</option><option value="low">low, open strings first</option><option value="high">high on the neck</option></select></label>
   </div>
   <div class="controls">
@@ -306,6 +307,7 @@ span.pname{min-width:0;color:#6e4f28}
   </table>
   <p>Tuned <b>G C F A D G</b> (low to high): fourths with a major third between strings 3 and 4 (F–A). It sits a fourth above the bass viol (D G C E A D). The tenor is non-transposing. Typically 7 gut frets, tied on and movable; they are a semitone apart, so the names here are the equal-tempered ones (real viols often use meantone).</p>
   <p><b>Clefs:</b> the tenor viol usually reads <b>alto clef</b> (C clef on the middle line, which is middle C). Some editions use tenor clef (C on the 4th line) or octave treble, and high parts can be in treble at pitch. Landmarks: middle line = C4; top line = G4 (open 1st string); bottom line = F3 (open 4th string).</p>
+  <p><b>Tuned in E:</b> some tenor viols are tuned E A D F♯ B E, a minor third lower (the same notes as a guitar, with its G string at F♯). If yours is, choose it under Settings: the tenor neck, the drills and the exercises then show where each note is on your viol.</p>
   <p><b>Frets:</b> treble, tenor and bass viols all have seven frets of gut tied round the neck; the seventh is a fifth above the open string. Higher notes are stopped on the bare fingerboard above the frets (Settings: Frets 0 to 8 or 9 shows those places).</p>
   <p><b>Treble and bass viols:</b> the treble viol is tuned D3 G3 C4 E4 A4 D5 and reads treble clef. The bass viol is tuned D2 G2 C3 E3 A3 D4 and reads bass clef, with alto clef for high passages. Their necks can be shown under Settings. When a score plays, the part chosen under Neck shows (in the toolbar) lights up on the neck of its viol; choose Every part to get a neck for each part. Each viol has its colour wherever its parts appear: treble yellow, tenor gold, bass purple.</p>
   <p><small>Sources: <a href="https://vdgsa.org/_files/ugd/d4b545_fba5a064eaad4df0b0ec9005c26cd76c.pdf">VdGSA viol help sheet</a>, <a href="https://saraband.com.au/altoclef.htm">Saraband: Viola &amp; Tenor Viol</a>, <a href="https://www.youngcomposersaward.co.uk/writing-for-viol-and-voices">Writing for viol and voices</a>.</small></p>
@@ -339,7 +341,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='3.0';
+const APP_VERSION='3.1';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -365,11 +367,13 @@ const VCOL={
   tenor:{neck:'#e3a01b',title:'#e8a317',ink:'#1a1410',paper:'#8a5200',mark:'#f0b13a'},
   bass:{neck:'#8a4fd8',title:'#b48cf0',ink:'#ffffff',paper:'#5a2a9a',mark:'#c9a6f5'}};
 const OPEN=VIOLS.tenor.open;
+// the tenor viol is usually tuned in G; some are tuned in E, a minor third lower (like a guitar with its G string at F♯)
+const TUNINGS={G:[67,62,57,53,48,43],E:[64,59,54,50,45,40]};
 const SHARP=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const FLAT =['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
 const NAT=[0,2,4,5,7,9,11];
 const st={mode:'explore',clef:'alto',acc:'all',key:0,frets:7,labels:true,sound:true,
-  show:[],target:null,answered:false,right:0,total:0,streak:0,pending:null,hl:{},necks:['tenor'],sv:'tenor',neckFrac:null,zoom:1,follow:true,pulse:{},place:'all',roteSize:1.3};
+  show:[],target:null,answered:false,right:0,total:0,streak:0,pending:null,hl:{},necks:['tenor'],sv:'tenor',neckFrac:null,zoom:1,follow:true,pulse:{},place:'all',roteSize:1.3,tune:'G'};
 // remembered on this device: the necks shown, the room they take (the bar above the score), the size of the music
 // and Follow score.
 // st.sv is the viol whose notes the staff under Settings shows.
@@ -378,7 +382,8 @@ try{const n=JSON.parse(localStorage.getItem('tenor-viol-necks')||'null');if(Arra
   const z=+localStorage.getItem('tenor-viol-zoom');if(z>=0.6&&z<=1.6)st.zoom=z;
   st.follow=localStorage.getItem('tenor-viol-follow')!=='0';
   const pl=localStorage.getItem('tenor-viol-place');if(pl==='low'||pl==='high')st.place=pl;
-  const rs=+localStorage.getItem('tenor-viol-rotesize');if(rs>=0.8&&rs<=3)st.roteSize=rs;}catch(e){}
+  const rs=+localStorage.getItem('tenor-viol-rotesize');if(rs>=0.8&&rs<=3)st.roteSize=rs;
+  const tu=localStorage.getItem('tenor-viol-tune');if(TUNINGS[tu]){st.tune=tu;OPEN.splice(0,6,...TUNINGS[tu]);}}catch(e){}
 st.sv=st.necks.includes('tenor')?'tenor':st.necks[0];
 // rote: a drill in progress (it has the neck of its viol to itself)
 const rote={on:false,kind:'find',viol:'tenor',oct:false,str:-1,range:'all',limit:0,end:0,right:0,total:0,streak:0,t0:0,target:null,wait:false};
@@ -921,12 +926,12 @@ function buildParts(){
 /* ---------- practise ----------
    Exercises for the tenor viol, written into the score so that they can be played (the neck shows each note). */
 const EX_INFO={
-  open:'The six open strings, low to high and back: G C F A D G.',
+  open:'The six open strings, low to high and back.',
   major:'Up and down the major scale.',minor:'Up and down the natural minor scale.',
   harm:'Harmonic minor: the 7th is raised, going up and coming down.',mel:'Melodic minor: 6th and 7th raised going up, natural coming down.',
   chrom:'Every semitone (every fret), up and down.',arpMaj:'The notes of the major chord, up and down.',arpMin:'The notes of the minor chord, up and down.',
   thirds:'The major scale in pairs a third apart: 1-3, 2-4, 3-5 ...',frets:'On each string from the lowest: open, frets 1, 2, 3, 4, and back to open.',
-  cross:'Neighbouring open strings in turn: G-C, C-F, F-A, A-D, D-G and back.',
+  cross:'Neighbouring open strings in turn, from the lowest pair to the highest, and back.',
   lowStep:'From the bottom line of the staff down by step to the lowest note, and back up.',lowLeap:'The bottom line, then each note below it in turn: a step, a third, a fourth ... so each ledger note is read from the line you know.',
   lowLines:'The notes on the ledger lines below the staff, down and up, then the notes in the spaces between them.',lowOct:'A note on the staff, then the same note an octave lower, below the staff.',
   highStep:'From the top line of the staff up by step to the highest note, and back down.',highLeap:'The top line, then each note above it in turn: a step, a third, a fourth ...',
@@ -2014,6 +2019,13 @@ document.querySelectorAll('.neckChk').forEach(c=>{c.checked=st.necks.includes(c.
 };});
 $('zoom').value=st.zoom;
 $('placeSel').value=st.place;
+// the tenor viol's tuning: its neck, the quizzes, the drills and the exercises all follow it
+$('tuneSel').value=st.tune;
+$('tuneSel').onchange=()=>{
+  st.tune=$('tuneSel').value;OPEN.splice(0,6,...TUNINGS[st.tune]);keep('tenor-viol-tune',st.tune==='G'?null:st.tune);
+  st.hl={};roteStrings();roteKindUI();refresh();drawNecks();
+  msg(`The tenor viol is tuned ${OPEN.slice().reverse().map(m=>SHARP[pc(m)]).join(' ')}, lowest string ${strName(OPEN[5])}.`);
+};
 $('placeSel').onchange=()=>{st.place=$('placeSel').value;keep('tenor-viol-place',st.place==='all'?null:st.place);st.hl={};playing?paintPlay():drawNecks();};
 try{$('origChk').checked=localStorage.getItem('tenor-viol-lines')!=='0';}catch(e){}
 $('origChk').onchange=()=>{keep('tenor-viol-lines',$('origChk').checked?null:'0');keepScroll(drawRecording);};

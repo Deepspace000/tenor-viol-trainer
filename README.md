@@ -30,6 +30,6 @@ Open it here: https://deepspace000.github.io/tenor-viol-trainer/
 
 Keys: left and right arrows move from note to note in the score, up and down change the rhythm, 1 to 6 pick a rhythm, `.` adds a dot, R adds a rest, Backspace deletes.
 
-Tenor viol tuning: G2 C3 F3 A3 D4 G4 (a fourth above the bass viol).
+Tenor viol tuning: G2 C3 F3 A3 D4 G4 (a fourth above the bass viol). A tenor viol tuned in E (E2 A2 D3 F♯3 B3 E4, a minor third lower, like a guitar with its G string at F♯) can be chosen under Settings > Tenor viol tuned: the tenor neck, the quizzes, the drills and the exercises then follow it.
 
 Uses [VexFlow](https://github.com/0xfe/vexflow) (MIT) for the staves and [PDF.js](https://github.com/mozilla/pdf.js) (Apache 2.0) to open PDFs.
