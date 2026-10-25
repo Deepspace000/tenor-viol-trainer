@@ -254,7 +254,7 @@ span.pname{min-width:0;color:#6e4f28}
     <label title="Tuned G C F A D G (G2 to G4)"><input type="checkbox" class="neckChk" value="tenor" checked> Tenor viol</label>
     <label title="Tuned D G C E A D (D2 to D4)"><input type="checkbox" class="neckChk" value="bass"> Bass viol</label>
     <span class="score" id="neckHint"></span>
-    <label title="How your tenor viol is tuned: the tenor neck, the drills and the exercises follow it">Tenor viol tuned <select id="tuneSel"><option value="G">G C F A D G (the usual)</option><option value="E">E A D F♯ B E (a minor third lower)</option></select></label>
+    <label title="How your tenor viol is tuned: the tenor neck, the drills and the exercises follow it">Tenor viol tuned <select id="tuneSel"><option value="G">G C F A D G (the usual)</option><option value="E">E A D F♯ B E, notes where they sound</option><option value="Ew">E A D F♯ B E, with G fingering (part a minor third higher)</option></select></label>
     <label title="Where a note lights up on the neck">Notes shown <select id="placeSel"><option value="all">low and high (every place)</option><option value="low">low, open strings first</option><option value="high">high on the neck</option></select></label>
   </div>
   <div class="controls">
@@ -307,8 +307,8 @@ span.pname{min-width:0;color:#6e4f28}
   </table>
   <p>Tuned <b>G C F A D G</b> (low to high): fourths with a major third between strings 3 and 4 (F–A). It sits a fourth above the bass viol (D G C E A D). The tenor is non-transposing. Typically 7 gut frets, tied on and movable; they are a semitone apart, so the names here are the equal-tempered ones (real viols often use meantone).</p>
   <p><b>Clefs:</b> the tenor viol usually reads <b>alto clef</b> (C clef on the middle line, which is middle C). Some editions use tenor clef (C on the 4th line) or octave treble, and high parts can be in treble at pitch. Landmarks: middle line = C4; top line = G4 (open 1st string); bottom line = F3 (open 4th string).</p>
-  <p><b>Tuned in E:</b> some tenor viols are tuned E A D F♯ B E, a minor third lower (the same notes as a guitar, with its G string at F♯). If yours is, choose it under Settings: the tenor neck, the drills and the exercises then show where each note is on your viol.</p>
-  <p><b>Frets:</b> treble, tenor and bass viols all have seven frets of gut tied round the neck; the seventh is a fifth above the open string. Higher notes are stopped on the bare fingerboard above the frets (Settings: Frets 0 to 8 or 9 shows those places).</p>
+  <p><b>Tuned in E:</b> some tenor viols are tuned E A D F♯ B E, a minor third lower (the same notes as a guitar, with its G string at F♯). Under Settings, choose either <i>notes where they sound</i> (the neck shows the real notes of your viol) or <i>with G fingering</i>: you finger as on a viol in G, the tenor part is written a minor third higher (like a part for a clarinet in A), and it all sounds in tune with the app and the other parts.</p>
+  <p><b>Frets:</b> treble, tenor and bass viols all have seven frets of gut tied round the neck; the seventh is a fifth above the open string. Higher notes are stopped on the bare fingerboard above the frets (Settings: Frets 0 to 8 ... 12 shows those places).</p>
   <p><b>Treble and bass viols:</b> the treble viol is tuned D3 G3 C4 E4 A4 D5 and reads treble clef. The bass viol is tuned D2 G2 C3 E3 A3 D4 and reads bass clef, with alto clef for high passages. Their necks can be shown under Settings. When a score plays, the part chosen under Neck shows (in the toolbar) lights up on the neck of its viol; choose Every part to get a neck for each part. Each viol has its colour wherever its parts appear: treble yellow, tenor gold, bass purple.</p>
   <p><small>Sources: <a href="https://vdgsa.org/_files/ugd/d4b545_fba5a064eaad4df0b0ec9005c26cd76c.pdf">VdGSA viol help sheet</a>, <a href="https://saraband.com.au/altoclef.htm">Saraband: Viola &amp; Tenor Viol</a>, <a href="https://www.youngcomposersaward.co.uk/writing-for-viol-and-voices">Writing for viol and voices</a>.</small></p>
 </div>
@@ -341,7 +341,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='3.1';
+const APP_VERSION='3.2';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -369,6 +369,16 @@ const VCOL={
 const OPEN=VIOLS.tenor.open;
 // the tenor viol is usually tuned in G; some are tuned in E, a minor third lower (like a guitar with its G string at F♯)
 const TUNINGS={G:[67,62,57,53,48,43],E:[64,59,54,50,45,40]};
+// A viol tuned in E but played with the fingering of one in G sounds a minor third lower than written, like a clarinet
+// in A. Then its part is shown a minor third higher (so that it sounds right with the other parts and the app), the tenor
+// neck is the G fingering with the written names, and every sound is the sound your viol makes.
+TUNINGS.Ew=TUNINGS.G;
+const TR=()=>st.tune==='Ew'?3:0;
+const wrKey=k=>{if(!TR())return k;let n=k-3;if(n<-6)n+=12;return n;};   // the key a minor third higher
+const unKey=k=>{if(!TR())return k;let n=k+3;if(n>6)n-=12;return n;};    // and back
+const isTenorPart=p=>violOf(p)==='tenor';
+const neckUp=v=>violAt(v)==='tenor'?TR():0;   // from the sound to the note written for the tenor neck
+const neckKey=v=>neckUp(v)?wrKey(st.key):st.key;
 const SHARP=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const FLAT =['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
 const NAT=[0,2,4,5,7,9,11];
@@ -389,7 +399,7 @@ st.sv=st.necks.includes('tenor')?'tenor':st.necks[0];
 const rote={on:false,kind:'find',viol:'tenor',oct:false,str:-1,range:'all',limit:0,end:0,right:0,total:0,streak:0,t0:0,target:null,wait:false};
 const keep=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,typeof v==='string'?v:JSON.stringify(v));}catch(e){}};
 
-for(let i=3;i<=9;i++){const o=document.createElement('option');o.value=i;o.textContent=i;if(i==7)o.selected=true;$('frets').append(o);}
+for(let i=3;i<=12;i++){const o=document.createElement('option');o.value=i;o.textContent=i;if(i==7)o.selected=true;$('frets').append(o);}   // (seven tied frets; higher places are on the bare fingerboard)
 
 const pc=m=>((m%12)+12)%12;
 const KEYS=[[0,'C','C major / A minor'],[1,'G','G major / E minor'],[2,'D','D major / B minor'],[3,'A','A major / F♯ minor'],[4,'E','E major / C♯ minor'],[5,'B','B major / G♯ minor'],[6,'F#','F♯ major / D♯ minor'],[7,'C#','C♯ major / A♯ minor'],
@@ -622,7 +632,7 @@ function dotsSvg(v,W,H,compact,notes){
   let s=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
   positions(v).forEach(p=>{
     if(!rote.on&&!allowed(p.m))return;   // (a drill uses all twelve notes)
-    const hl=st.hl[p.k],lab=spell(p.m).pcname,x=X(p.f),y=top+p.s*gap;
+    const hl=st.hl[p.k],lab=spell(p.m,neckKey(v)).pcname,x=X(p.f),y=top+p.s*gap;
     if(hl){lit.push({p,hl,lab,x,y});return;}
     const w=pk.get(p.k),inP=w!=null,op=rote.on&&(rote.str>=0&&p.s!==rote.str||!roteRangeOk(p.m))?'.3':dim?(inP?'.8':'.3'):(pk.size&&!inP?'.62':'');
     s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"${op?` opacity="${op}"`:''}>`+
@@ -660,7 +670,7 @@ function pieceNotes(){
   slots.forEach(sl=>{
     let pis=sl.pi!=null?[sl.pi]:sc.parts.map((_,k)=>k).filter(k=>violOf(sc.parts[k])===sl.v);   // a part's own neck, or the neck of its viol
     if(!pis.length&&neckFor(sc.pi)===sl.id)pis=[sc.pi];   // (the part shown on a neck no part plays)
-    const w={};pis.forEach(k=>{for(const m in dur[k])w[m]=(w[m]||0)+dur[k][m];});
+    const w={};pis.forEach(k=>{for(const m in dur[k]){const n=+m+neckUp(sl.id);w[n]=(w[n]||0)+dur[k][m];}});
     const most=Math.max(0,...Object.values(w));
     if(most>0)rangeOf[sl.id]=new Map(Object.keys(w).map(m=>[+m,w[m]/most]));
   });
@@ -690,7 +700,7 @@ $('neckWrap').addEventListener('click',e=>{
 
 /* ---------- staff ---------- */
 function drawStaff(midis,colors){
-  const el=$('staff');el.innerHTML='';
+  const el=$('staff');el.innerHTML='';const sk=neckKey(st.sv);
   const w=Math.max(300,el.clientWidth||700);
   const r=new Renderer(el,Renderer.Backends.SVG);r.resize(w,270);
   const ctx=r.getContext();
@@ -698,14 +708,14 @@ function drawStaff(midis,colors){
   const clef=staffClef(),vfClef=clef==='treble8'?'treble':clef;
   const stave=new Stave(10,75,w-20);
   if(clef==='treble8')stave.addClef('treble','default','8vb');else stave.addClef(clef);
-  stave.addKeySignature(KEYS.find(k=>k[0]===st.key)[1]);
+  stave.addKeySignature(KEYS.find(k=>k[0]===sk)[1]);
   stave.setContext(ctx).draw();
   st.show=midis.slice();
   if(!midis.length)return;
   const shift=clef==='treble8'?1:0;
   const dur=midis.length>1?'q':'w';
   const notes=midis.map((m,i)=>{
-    const sp=spell(m);
+    const sp=spell(m,sk);
     const vf=sp.letter.toLowerCase()+(sp.off>0?'#':sp.off<0?'b':'');
     const sn=new StaveNote({keys:[vf+'/'+(sp.oct+shift)],duration:dur,clef:vfClef});
     if(sp.needAcc)sn.addModifier(new Accidental(sp.off>0?'#':sp.off<0?'b':'n'));
@@ -715,7 +725,7 @@ function drawStaff(midis,colors){
   v.addTickables(notes);
   new Formatter().joinVoices([v]).format([v],Math.min(w-140,notes.length*80));
   v.draw(ctx,stave);
-  if(st.mode==='explore')labelNotes(svg,notes,midis.map(m=>({m,key:st.key})),stave);
+  if(st.mode==='explore')labelNotes(svg,notes,midis.map(m=>({m,key:sk})),stave);
   notes.forEach((sn,i)=>{const e=sn.getSVGElement&&sn.getSVGElement();if(!e)return;
     e.style.cursor=st.mode==='explore'?'ns-resize':'pointer';
     e.addEventListener('pointerdown',ev=>startDrag(ev,i));});
@@ -746,7 +756,7 @@ addEventListener('pointerup',()=>{
 });
 function onStaffNote(m){
   if(st.mode!=='explore'&&!st.answered)return;
-  play(m,soundOf(st.sv));st.hl={};
+  play(m-neckUp(st.sv),soundOf(st.sv));st.hl={};
   // where the note is on every neck shown
   const where=[],slots=neckSlots();
   slots.forEach(sl=>{const ps=placesFor(sl.id,m);ps.forEach(p=>st.hl[p.k]=colOfNeck(sl.id).neck);
@@ -757,7 +767,7 @@ function onStaffNote(m){
 
 /* ---------- actions ---------- */
 function msg(t,c){const m=$('msg');m.textContent=t;m.className=c||'';}
-function describe(v,s,f,m){const sp=spell(m);return `${neckSlots().length>1?neckName(v)+', s':'S'}tring ${s+1}, ${f===0?'open':'fret '+f} = ${sp.name}`;}
+function describe(v,s,f,m){const sp=spell(m,neckKey(v)),u=neckUp(v);return `${neckSlots().length>1?neckName(v)+', s':'S'}tring ${s+1}, ${f===0?'open':'fret '+f} = ${sp.name}`+(u?` (sounds ${spell(m-u).name})`:'');}
 
 function showString(v,s){
   st.sv=violAt(v);const o=VIOLS[st.sv].open[s],ms=[];for(let f=0;f<=st.frets;f++)if(allowed(o+f))ms.push(o+f);
@@ -767,11 +777,11 @@ function onNeck(v,s,f){
   if(rote.on){roteTap(v,s,f);return;}
   const m=VIOLS[violAt(v)].open[s]+f;
   if(st.mode==='explore'){
-    st.sv=violAt(v);play(m,soundAt(v));st.hl={[hk(v,s,f)]:colOfNeck(v).neck};drawNecks();drawStaff([m]);msg(describe(v,s,f,m));
-    if(entryOn()){if(!VIOLS[v]&&+v.slice(1)!==sc.pi)usePart(+v.slice(1));addItem(m);}   // a part's own neck writes into that part
+    st.sv=violAt(v);play(m-neckUp(v),soundAt(v));st.hl={[hk(v,s,f)]:colOfNeck(v).neck};drawNecks();drawStaff([m]);msg(describe(v,s,f,m));
+    if(entryOn()){if(!VIOLS[v]&&+v.slice(1)!==sc.pi)usePart(+v.slice(1));addItem(m-neckUp(v));}   // a part's own neck writes into that part (the note as it sounds)
   }else if(st.mode==='s2n'){
     if(st.answered)return;
-    play(m,soundAt(v));st.answered=true;st.total++;
+    play(m-neckUp(v),soundAt(v));st.answered=true;st.total++;
     const ok=m===st.target;
     st.hl={};
     neckSlots().forEach(sl=>positions(sl.id).filter(p=>p.m===st.target).forEach(p=>st.hl[p.k]='#6fbf73'));   // the note on any neck shown counts
@@ -815,7 +825,7 @@ function submitName(){
   st.answered=true;st.total++;
   const ok=g===pc(st.target);
   ok?(st.right++,st.streak++):st.streak=0;
-  play(st.target,soundOf(st.sv));
+  play(st.target-neckUp(st.sv),soundOf(st.sv));
   st.hl={};st.hideLabels=false;
   if(st.mode==='n2name'){st.hl[st.tpos.k]=ok?'#6fbf73':'#e0605a';drawNecks();drawStaff([st.target]);}
   else drawStaff([st.target],[ok?'#2d8a3a':'#c0392b']);
@@ -990,6 +1000,7 @@ $('exGo').onclick=()=>{
   if(sc.parts.some(p=>p.items.length)&&!confirm('Replace the score with this exercise?'))return;
   stopPlay();
   const ex=makeExercise();
+  if(TR()){ex.items.forEach(it=>{if(it.m!=null)it.m-=TR();});ex.key=unKey(ex.key);ex.items[0].sec.k=ex.key;}   // (written for G fingering, kept as it sounds)
   sc.parts=[newPart('Tenor viol',null,'viola',0)];sc.pi=0;sc.neckPart=0;sc.items=ex.items;sc.sel=-1;sc.cur=ex.items.length;
   st.key=ex.key;$('key').value=ex.key;refresh();
   sc.ts=[4,4];$('tsn').value=4;$('tsd').value=4;$('title').value=ex.title;$('fromSel').value='start';$('fromBar').value='';
@@ -1030,7 +1041,7 @@ function setDots(n){sc.dots=n;if(sc.sel>=0){snap();sc.items[sc.sel].d=durT();}bu
 function lightNeck(m){
   st.hl={};
   const v=partNecks()?'p'+sc.pi:sc.parts.length>1&&sc.neckPart!==sc.pi?null:neckFor(sc.pi);
-  if(v)placesFor(v,m).forEach(p=>st.hl[p.k]=colOfNeck(v).neck);
+  if(v)placesFor(v,m+neckUp(v)).forEach(p=>st.hl[p.k]=colOfNeck(v).neck);
   drawNecks();
 }
 function selectItem(i){
@@ -1050,7 +1061,7 @@ function setSel(i){
   if(noteEls.has(i)&&!rec.on){paintNote(prev,null);paintNote(i,'#1f5fbf');selEl=noteEls.get(i)[0];}
   else drawRecording();
   if(selEl)selEl.scrollIntoView({block:'nearest',inline:'nearest'});
-  stat('Note '+(i+1)+' of '+sc.items.length+(it.m==null?' (rest)':' ('+spell(it.m,keyAt(i)).name+', '+solfa(it.m,keyAt(i))+')')+'. Left/right arrows move between notes, up/down change its rhythm, Delete removes it.');
+  stat('Note '+(i+1)+' of '+sc.items.length+(it.m==null?' (rest)':(T=>' ('+spell(it.m+T,T?wrKey(keyAt(i)):keyAt(i)).name+', '+solfa(it.m+T,T?wrKey(keyAt(i)):keyAt(i))+')')(isTenorPart(part())?TR():0))+'. Left/right arrows move between notes, up/down change its rhythm, Delete removes it.');
 }
 function delNote(){
   const i=sc.sel>=0?sc.sel:sc.cur-1;if(i<0||i>=sc.items.length)return;
@@ -1184,6 +1195,7 @@ function drawRecording(){
 }
 function drawScore(el){
   el.innerHTML='';noteElsAll=null;
+  const T=isTenorPart(part())?TR():0,KK=k=>T?wrKey(k):k;   // (the tenor part of a viol in E played with G fingering)
   $('rectitle').textContent=$('title').value||'Tenor viol';
   const nReal=sc.items.length,bars=splitBars(viewItems());
   if(!bars.length){el.innerHTML='<div class="ph">Pick a rhythm, then click notes on the neck. They appear here.</div>';noteEls=new Map();return;}
@@ -1218,8 +1230,8 @@ function drawScore(el){
       const prevBar=gb>0?bars[gb-1]:null,clefChange=!isFirst&&prevBar&&barClef(prevBar)!==clef;
       if(clefChange)stave.addClef(clef==='treble8'?'treble':clef,'small');
       if(isFirst){if(clef==='treble8')stave.addClef('treble','default','8vb');else stave.addClef(clef);
-        stave.addKeySignature(keyName(bar.key));if(gb===0||bar.sec)stave.addTimeSignature(tsText(bar));}
-      else if(bar.sec){stave.addKeySignature(keyName(bar.key),bar.sec.keyChange?keyName(bar.sec.prevKey):undefined);stave.addTimeSignature(tsText(bar));}
+        stave.addKeySignature(keyName(KK(bar.key)));if(gb===0||bar.sec)stave.addTimeSignature(tsText(bar));}
+      else if(bar.sec){stave.addKeySignature(keyName(KK(bar.key)),bar.sec.keyChange?keyName(KK(bar.sec.prevKey)):undefined);stave.addTimeSignature(tsText(bar));}
       if(!next)stave.setEndBarType(Barline.type.END);else if(next.sec)stave.setEndBarType(Barline.type.DOUBLE);   // a double bar before each new piece
       if(bar.repStart)stave.setBegBarType(Barline.type.REPEAT_BEGIN);
       if(bar.repEnd)stave.setEndBarType(Barline.type.REPEAT_END);
@@ -1228,18 +1240,18 @@ function drawScore(el){
         stave.setVoltaType(beg&&fin?Volta.type.BEGIN_END:beg?Volta.type.BEGIN:fin?Volta.type.END:Volta.type.MID,beg?bar.volta+'.':'',-12);
       }
       stave.setContext(ctx).draw();
-      const kn=keyName(bar.key),labels=[];
+      const kn=keyName(KK(bar.key)),labels=[];
       const notes=bar.map(p=>{
         const rp=repOf(p.d),dur=BASES[rp.bi][2]+'d'.repeat(rp.d)+(p.m==null?'r':'');
         let sn;
         if(p.m==null)sn=new StaveNote({keys:[restKey],duration:dur,clef:vfClef});
-        else{const sp=spell(p.m,bar.key);
+        else{const sp=spell(p.m+T,KK(bar.key));
           sn=new StaveNote({keys:[sp.letter.toLowerCase()+(sp.off>0?'#':sp.off<0?'b':'')+'/'+(sp.oct+shift)],duration:dur,clef:vfClef});}
         for(let k=0;k<rp.d;k++)Dot.buildAndAttach([sn],{all:true});
         const col=p.idx===sc.sel?'#1f5fbf':(p.idx>=nReal?'#c0392b':null);
         if(col)sn.setStyle({fillStyle:col,strokeStyle:col});
         allNotes.push({sn,p,si});
-        labels.push(p.m!=null&&!p.tiePrev?{m:p.m,key:bar.key}:null);   // a tied-on part of a note is not named again
+        labels.push(p.m!=null&&!p.tiePrev?{m:p.m+T,key:KK(bar.key)}:null);   // a tied-on part of a note is not named again
         return sn;});
       let beams=[];try{beams=Beam.generateBeams(notes);}catch(e){}
       const v=new Voice({num_beats:Math.max(1,bar.reduce((a,p)=>a+p.d,0)/TPQ),beat_value:4}).setStrict(false);
@@ -1307,7 +1319,7 @@ function fullColumns(){
 function drawFullScore(el){
   el.innerHTML='';
   $('rectitle').textContent=$('title').value||'Tenor viol';
-  const cols=fullColumns(),NP=sc.parts.length;
+  const cols=fullColumns(),NP=sc.parts.length,TP=sc.parts.map(p=>isTenorPart(p)?TR():0),KP=TP.map(t=>k=>t?wrKey(k):k);
   noteElsAll=sc.parts.map(()=>new Map());noteEls=noteElsAll[sc.pi];selEl=null;
   if(!cols.length){el.innerHTML='<div class="ph">Pick a rhythm, then click notes on the neck. They appear here.</div>';return;}
   const W=Math.max(340,((el.clientWidth||900)-12)/st.zoom),nameW=70;
@@ -1338,8 +1350,8 @@ function drawFullScore(el){
         const stave=new Stave(x,50+hd+pi*gapY,width),clef=clefs[pi];
         if(!isFirst&&prev&&clefOf(pt,prev.clefs[pi])!==clef)stave.addClef(clef==='treble8'?'treble':clef,'small');
         if(isFirst){if(clef==='treble8')stave.addClef('treble','default','8vb');else stave.addClef(clef);
-          stave.addKeySignature(keyName(bar.key));if(ci===0||bar.sec)stave.addTimeSignature(tsText(bar));}
-        else if(bar.sec){stave.addKeySignature(keyName(bar.key),bar.sec.keyChange?keyName(bar.sec.prevKey):undefined);stave.addTimeSignature(tsText(bar));}
+          stave.addKeySignature(keyName(KP[pi](bar.key)));if(ci===0||bar.sec)stave.addTimeSignature(tsText(bar));}
+        else if(bar.sec){stave.addKeySignature(keyName(KP[pi](bar.key)),bar.sec.keyChange?keyName(KP[pi](bar.sec.prevKey)):undefined);stave.addTimeSignature(tsText(bar));}
         if(!next)stave.setEndBarType(Barline.type.END);else if(next.bar.sec)stave.setEndBarType(Barline.type.DOUBLE);
         if(bar.repStart)stave.setBegBarType(Barline.type.REPEAT_BEGIN);
         if(bar.repEnd)stave.setEndBarType(Barline.type.REPEAT_END);
@@ -1364,16 +1376,16 @@ function drawFullScore(el){
           const rp=repOf(p.d),dur=BASES[rp.bi][2]+'d'.repeat(rp.d)+(p.m==null?'r':'');
           let sn;
           if(p.m==null)sn=new StaveNote({keys:[restKey],duration:dur,clef:vfClef});
-          else{const sp=spell(p.m,bar.key);sn=new StaveNote({keys:[sp.letter.toLowerCase()+(sp.off>0?'#':sp.off<0?'b':'')+'/'+(sp.oct+shift)],duration:dur,clef:vfClef});}
+          else{const sp=spell(p.m+TP[pi],KP[pi](bar.key));sn=new StaveNote({keys:[sp.letter.toLowerCase()+(sp.off>0?'#':sp.off<0?'b':'')+'/'+(sp.oct+shift)],duration:dur,clef:vfClef});}
           for(let k=0;k<rp.d;k++)Dot.buildAndAttach([sn],{all:true});
           if(pi===sc.pi&&p.idx===sc.sel)sn.setStyle({fillStyle:'#1f5fbf',strokeStyle:'#1f5fbf'});
-          ticks.push(sn);real.push(sn);labels.push(p.m!=null&&!p.tiePrev?{m:p.m,key:bar.key}:null);
+          ticks.push(sn);real.push(sn);labels.push(p.m!=null&&!p.tiePrev?{m:p.m+TP[pi],key:KP[pi](bar.key)}:null);
           all[pi].push({sn,p,si});pos=Math.max(pos,p.at)+p.d;
         });
         let beams=[];try{beams=Beam.generateBeams(real);}catch(e){}
         const v=new Voice({num_beats:Math.max(1,(c.t1-c.t0)/TPQ),beat_value:4}).setStrict(false);
         v.addTickables(ticks);
-        Accidental.applyAccidentals([v],kn);
+        Accidental.applyAccidentals([v],keyName(KP[pi](bar.key)));
         voices.push(v);drawn.push({v,beams,real,labels,stave:staves[pi]});
       });
       const fw=Math.max(40,x+width-staves[0].getNoteStartX()-14);
@@ -1434,7 +1446,7 @@ function paintPlay(){
   const each=partNecks();
   (each?sc.parts.map((_,i)=>i):[sc.neckPart>=0&&sc.neckPart<sc.parts.length?sc.neckPart:sc.pi]).forEach(pi=>{
     const v=each?'p'+pi:neckFor(pi),m=p.now[pi];
-    if(m!=null)placesFor(v,m).forEach(q=>{st.hl[q.k]=colOfPart(pi).neck;st.pulse[q.k]=p.beat[pi];});
+    if(m!=null)placesFor(v,m+neckUp(v)).forEach(q=>{st.hl[q.k]=colOfPart(pi).neck;st.pulse[q.k]=p.beat[pi];});
   });
   drawNecks();
 }
@@ -2023,8 +2035,8 @@ $('placeSel').value=st.place;
 $('tuneSel').value=st.tune;
 $('tuneSel').onchange=()=>{
   st.tune=$('tuneSel').value;OPEN.splice(0,6,...TUNINGS[st.tune]);keep('tenor-viol-tune',st.tune==='G'?null:st.tune);
-  st.hl={};roteStrings();roteKindUI();refresh();drawNecks();
-  msg(`The tenor viol is tuned ${OPEN.slice().reverse().map(m=>SHARP[pc(m)]).join(' ')}, lowest string ${strName(OPEN[5])}.`);
+  st.hl={};roteStrings();roteKindUI();refresh();drawNecks();drawRecording();
+  msg(st.tune==='Ew'?'Your viol in E with G fingering: the tenor part is written a minor third higher, the neck shows the G fingering, and the sound is your viol\'s.':`The tenor viol is tuned ${OPEN.slice().reverse().map(m=>SHARP[pc(m)]).join(' ')}, lowest string ${strName(OPEN[5])}.`);
 };
 $('placeSel').onchange=()=>{st.place=$('placeSel').value;keep('tenor-viol-place',st.place==='all'?null:st.place);st.hl={};playing?paintPlay():drawNecks();};
 try{$('origChk').checked=localStorage.getItem('tenor-viol-lines')!=='0';}catch(e){}
@@ -2204,7 +2216,7 @@ function roteMark(ok,m,key,pressed){
   const nm=K==='find'?t.name:t.sp?t.sp.name:spell(t.m).name;
   $('roteHow').textContent=ok?`Right: ${nm}.`:K==='name'||K==='sname'?`Not quite: it is ${nm}, not ${NOTE_BTNS[pressed][1]}.`:`Not quite: that was ${spell(m).name}. Green shows where ${nm} is.`;
   msg($('roteHow').textContent,ok?'ok':'bad');
-  play(K==='name'||K==='sname'?t.m:m,soundOf(rote.viol));roteScore();drawNecks();roteSaveNow();
+  play((K==='name'||K==='sname'?t.m:m)-neckUp(rote.viol),soundOf(rote.viol));roteScore();drawNecks();roteSaveNow();
   setTimeout(()=>{if(rote.target===t)roteNext();},ok?700:1700);
 }
 // a line: each note in turn; a wrong one shows where it was, then the line goes on
@@ -2215,7 +2227,7 @@ function roteLineTap(m,s,key){
   st.hl={};if(!ok)positions(rote.viol).filter(p=>p.m===n.m&&strOk(p.s)).forEach(p=>st.hl[p.k]='#6fbf73');st.hl[key]=ok?'#6fbf73':'#e0605a';
   $('roteHow').textContent=ok?`Right: ${n.name}.`:`Not quite: that was ${spell(m).name}; it is ${n.name}, in green.`;
   msg($('roteHow').textContent,ok?'ok':'bad');
-  play(m,soundOf(rote.viol));roteStaffDraw(L.line,L.cur,L.marks);roteScore();drawNecks();roteSaveNow();
+  play(m-neckUp(rote.viol),soundOf(rote.viol));roteStaffDraw(L.line,L.cur,L.marks);roteScore();drawNecks();roteSaveNow();
   const done=L.cur>=L.line.length;
   setTimeout(()=>{if(!rote.on||rote.target!==L)return;if(done){roteNext();return;}rote.wait=false;st.hl={};drawNecks();},done?1000:ok?250:1200);
 }
@@ -2250,7 +2262,7 @@ function roteStaffCheck(){
   st.hl={[t.k]:ok?'#6fbf73':'#e0605a'};st.hlBlank=null;
   $('roteHow').textContent=ok?`Right: ${mine.name}.`:`Not quite: you put ${mine.name}; it is ${right.name}, in green.`;
   msg($('roteHow').textContent,ok?'ok':'bad');
-  play(t.m,soundOf(rote.viol));roteScore();drawNecks();roteSaveNow();
+  play(t.m-neckUp(rote.viol),soundOf(rote.viol));roteScore();drawNecks();roteSaveNow();
   setTimeout(()=>{if(rote.target===t)roteNext();},ok?900:2200);
 }
 $('roteCheck').onclick=roteStaffCheck;
