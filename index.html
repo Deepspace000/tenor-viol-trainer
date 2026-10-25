@@ -90,6 +90,7 @@ input[type=range],input[type=checkbox]{accent-color:var(--rub)}
 #roteStaff svg{display:block}
 #roteStaff.tap{cursor:crosshair}
 #roteAcc button{min-width:44px;font-size:20px}
+#roteMove button{min-width:52px;font-size:17px}
 .rote-names{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin-top:6px}
 .rote-names button{font-size:19px;padding:8px 4px}
 .score{color:var(--dim);font-size:14px}
@@ -216,7 +217,7 @@ span.pname{min-width:0;color:#6e4f28}
     <label>Drill <select id="roteKind">
       <option value="find">Name shown: tap it on the neck</option>
       <option value="name">Note on the neck: press its name</option>
-      <option value="nstaff">Note on the neck: tap it on the staff</option>
+      <option value="nstaff">Note on the neck: put it on the staff</option>
       <option value="sfind">Note on the staff: tap it on the neck</option>
       <option value="sname">Note on the staff: press its name</option>
       <option value="line">Line on the staff: play it on the neck</option>
@@ -312,7 +313,7 @@ span.pname{min-width:0;color:#6e4f28}
 
 <div id="neckWrap"></div>
 <div id="roteBar" style="display:none">
-  <div class="rote-ask"><span id="roteAsk"></span><div id="roteStaff" style="display:none"></div><span id="roteHow"></span><span id="roteAcc" class="grp" style="display:none"><button data-a="-1" title="Flat">♭</button><button data-a="0" class="on" title="Natural">♮</button><button data-a="1" title="Sharp">♯</button></span><span id="roteScore"></span><button id="roteEnd">Finish</button></div>
+  <div class="rote-ask"><span id="roteAsk"></span><div id="roteStaff" style="display:none"></div><span id="roteHow"></span><span id="roteAcc" class="grp" style="display:none"><button data-a="-1" title="Flat">♭</button><button data-a="0" class="on" title="Natural">♮</button><button data-a="1" title="Sharp">♯</button></span><span id="roteMove" class="grp" style="display:none"><button id="roteUp" title="Move the note up a line or space (up arrow)">▲ Up</button><button id="roteDown" title="Move the note down a line or space (down arrow)">▼ Down</button><button id="roteCheck" title="Is the note in the right place? (Enter)">Check</button></span><span id="roteScore"></span><button id="roteEnd">Finish</button></div>
   <div class="rote-names" id="roteNames"></div>
 </div>
 <div id="statusLine"><span id="msg"></span><span class="score" id="recstat"></span></div>
@@ -338,7 +339,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='2.8';
+const APP_VERSION='2.9';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -2039,6 +2040,7 @@ $('expBtn').onclick=()=>{
 $('pdfBtn').onclick=()=>{if(rec.on)stopRec();stopPlay();drawRecording();stat('In the print dialog, choose "Save as PDF" as the destination.');setTimeout(()=>window.print(),150);};
 addEventListener('keydown',e=>{
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
+  if(roteMoving()&&['ArrowUp','ArrowDown','Enter'].includes(e.key)){e.preventDefault();if(e.key==='Enter')roteStaffCheck();else roteMove(e.key==='ArrowUp'?1:-1);return;}   // (putting a note on the staff)
   if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();moveSel(e.key==='ArrowLeft'?-1:1);}
   else if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();setDur((sc.bi+(e.key==='ArrowUp'?-1:1)+BASES.length)%BASES.length);}
   else if(e.key>='1'&&e.key<='6')setDur(+e.key-1);
@@ -2057,10 +2059,10 @@ addEventListener('keydown',e=>{
    - Same note, another place: a note lights up with its name; tap the same note in another place.
    A round goes on until Finish, or for a set time (as many as you can). It can keep to one string. Every round is kept
    on this device with its date, time, mark and speed (a round left unfinished is kept too). */
-const ROTE_KINDS={find:'Name shown: tap it on the neck',name:'Note on the neck: press its name',nstaff:'Note on the neck: tap it on the staff',
+const ROTE_KINDS={find:'Name shown: tap it on the neck',name:'Note on the neck: press its name',nstaff:'Note on the neck: put it on the staff',
   sfind:'Note on the staff: tap it on the neck',sname:'Note on the staff: press its name',line:'Line on the staff: play it on the neck',same:'Same note, another place on the neck'};
 const ROTE_INFO={find:"A note's name is shown: tap it on the neck.",name:'A place on the neck lights up: press its name.',
-  nstaff:"A place on the neck lights up: tap the staff where that note is written, in the viol's clef (alto clef for the tenor viol). For a sharp or flat note, press ♯ or ♭ first.",
+  nstaff:"A place on the neck lights up. A note waits on the staff, somewhere else: move it with Up and Down (a line or space at a time) to where that note is written, in the viol's clef (alto clef for the tenor viol), choose ♭ or ♯ if it needs one, then press Check. Tapping the staff moves the note near the tap, for the arrows to finish.",
   sfind:"A note is shown on the staff, in the viol's clef (alto clef for the tenor viol): tap it on the neck, in the right octave.",
   sname:"A note is shown on the staff, in the viol's clef: press its name.",line:'Six notes are shown on the staff: play them on the neck one after another, as you would read them.',
   same:'A note lights up with its name: tap the same note in another place on the neck.'};
@@ -2144,8 +2146,11 @@ function roteNext(){
     rote.target=p;st.hl={[p.k]:'#d9a441'};st.hlBlank=p.k;
     $('roteAsk').textContent='?';$('roteHow').textContent='Which note is the gold dot? Press its name.';msg('Which note is the gold dot?');
   }else if(K==='nstaff'){
-    rote.target=p;st.hl={[p.k]:'#d9a441'};st.hlBlank=p.k;roteAccSet(0);roteStaffDraw([],-1,[],true);
-    $('roteHow').textContent='Tap the staff where the gold dot is written.';msg('Where is the gold dot on the staff?');
+    rote.target=p;st.hl={[p.k]:'#d9a441'};st.hlBlank=p.k;rote.acc=0;roteAccSet(0);
+    const sh=SHARP[pc(p.m)].length>1?1:0,dia=(Math.floor((p.m-sh)/12)-1)*7+LET.indexOf(SHARP[pc(p.m)][0]),top=roteTopDia();
+    let off;do{off=(Math.random()<0.5?-1:1)*(2+Math.floor(Math.random()*4));}while(top-(dia+off)<-10||top-(dia+off)>18);   // a few lines or spaces away
+    rote.pos=dia+off;roteMoveDraw();
+    $('roteHow').textContent='Move the note to where the gold dot is written, then Check.';msg('Where is the gold dot on the staff?');
   }else if(K==='same'){
     rote.target=p;st.hl={[p.k]:'#d9a441'};
     $('roteAsk').textContent=spell(p.m).name;$('roteHow').textContent='Tap the same note in another place.';msg('Find '+spell(p.m).name+' in another place');
@@ -2196,27 +2201,39 @@ function roteLineTap(m,s,key){
 }
 // writing on the staff: the line or space tapped, with the ♭, ♮ or ♯ chosen, makes the note
 const CLEF_TOP={alto:['G',4],tenor:['E',4],treble:['F',5],treble8:['F',4],bass:['A',3]};   // the note on the top line
-function roteAccSet(a){rote.acc=a;document.querySelectorAll('#roteAcc button').forEach(b=>b.classList.toggle('on',+b.dataset.a===a));}
+function roteAccSet(a){rote.acc=a;document.querySelectorAll('#roteAcc button').forEach(b=>b.classList.toggle('on',+b.dataset.a===a));if(roteMoving())roteMoveDraw();}
 document.querySelectorAll('#roteAcc button').forEach(b=>b.onclick=()=>roteAccSet(+b.dataset.a));
+// the note being moved on the staff: its line or space (rote.pos, counted in lines and spaces), with ♭, ♮ or ♯
+const roteTopDia=()=>{const [L,O]=CLEF_TOP[VIOLS[rote.viol].clef||st.clef]||CLEF_TOP.alto;return O*7+LET.indexOf(L);};
+function roteMovable(){const d=rote.pos,L=LET[((d%7)+7)%7],o=Math.floor(d/7),a=rote.acc;
+  return {m:12*(o+1)+BASE[L]+a,name:L+SYM[a]+o,vf:L.toLowerCase()+(a>0?'#':a<0?'b':''),oct:o,acc:a>0?'#':a<0?'b':null};}
+const roteMoveDraw=()=>roteStaffDraw([roteMovable()],0,[],true);   // (in blue while it is being moved)
+const roteMoving=()=>rote.on&&rote.kind==='nstaff'&&!rote.wait&&rote.target&&rote.pos!=null;
+function roteMove(n){if(!roteMoving())return;const top=roteTopDia(),d=rote.pos+n;if(top-d<-10||top-d>18)return;rote.pos=d;roteMoveDraw();}
+$('roteUp').onclick=()=>roteMove(1);
+$('roteDown').onclick=()=>roteMove(-1);
+// a tap on the staff moves the note near it (taps are rough on a small staff; the arrows finish the job)
 $('roteStaff').addEventListener('click',e=>{
-  const t=rote.target;if(!rote.on||rote.kind!=='nstaff'||rote.wait||!t||!rote.stave)return;
+  if(!roteMoving()||!rote.stave)return;
   const svg=$('roteStaff').querySelector('svg');if(!svg)return;
   const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const y=pt.matrixTransform(svg.getScreenCTM().inverse()).y;
-  const clef=VIOLS[rote.viol].clef||st.clef,[L0,O0]=CLEF_TOP[clef]||CLEF_TOP.alto;
-  const steps=Math.max(-10,Math.min(18,Math.round((y-rote.stave.getYForLine(0))/5))),dia=O0*7+LET.indexOf(L0)-steps;
-  const letter=LET[((dia%7)+7)%7],oct=Math.floor(dia/7),a=rote.acc,m=12*(oct+1)+BASE[letter]+a;
-  const mine={m,name:letter+SYM[a]+oct,vf:letter.toLowerCase()+(a>0?'#':a<0?'b':''),oct,acc:a>0?'#':a<0?'b':null},ok=m===t.m;
-  // the right note, spelt with the letter tapped when it can be (F♯ rather than G♭ after a tap on F)
+  rote.pos=roteTopDia()-Math.max(-10,Math.min(18,Math.round((y-rote.stave.getYForLine(0))/5)));roteMoveDraw();
+});
+function roteStaffCheck(){
+  if(!roteMoving())return;
+  const t=rote.target,mine=roteMovable(),ok=mine.m===t.m,letter=mine.name[0],oct=mine.oct;
+  // the right note, spelt with the letter chosen when it can be (F♯ rather than G♭ when the note is on F)
   let right=null;for(let o=oct-1;o<=oct+1&&!right;o++){const off=t.m-(12*(o+1)+BASE[letter]);if(Math.abs(off)<=1)right={m:t.m,name:letter+SYM[off]+o,vf:letter.toLowerCase()+(off>0?'#':off<0?'b':''),oct:o,acc:off>0?'#':off<0?'b':null};}
   if(!right)right=roteSpell(t.m);
   rote.wait=true;rote.total++;if(ok){rote.right++;rote.streak++;}else rote.streak=0;
   roteStaffDraw(ok?[mine]:[mine,right],-1,ok?[true]:[false,true],true);
   st.hl={[t.k]:ok?'#6fbf73':'#e0605a'};st.hlBlank=null;
-  $('roteHow').textContent=ok?`Right: ${mine.name}.`:`Not quite: you wrote ${mine.name}; it is ${right.name}, in green.`;
+  $('roteHow').textContent=ok?`Right: ${mine.name}.`:`Not quite: you put ${mine.name}; it is ${right.name}, in green.`;
   msg($('roteHow').textContent,ok?'ok':'bad');
   play(t.m,soundOf(rote.viol));roteScore();drawNecks();roteSaveNow();
-  setTimeout(()=>{if(rote.target===t)roteNext();},ok?900:2000);
-});
+  setTimeout(()=>{if(rote.target===t)roteNext();},ok?900:2200);
+}
+$('roteCheck').onclick=roteStaffCheck;
 let roteTimer=0;
 function roteStart(){
   stopPlay();if(rec.on)stopRec();
@@ -2226,7 +2243,7 @@ function roteStart(){
   rote.end=rote.t0+rote.limit*1000;
   st.hideLabels=true;
   $('roteGo').style.display='none';$('roteBar').style.display='';
-  $('roteNames').style.display=rote.kind==='name'||rote.kind==='sname'?'':'none';$('roteAcc').style.display=rote.kind==='nstaff'?'':'none';$('roteMsg').textContent='A drill is running: Finish is under the neck.';
+  $('roteNames').style.display=rote.kind==='name'||rote.kind==='sname'?'':'none';$('roteAcc').style.display=$('roteMove').style.display=rote.kind==='nstaff'?'':'none';$('roteMsg').textContent='A drill is running: Finish is under the neck.';
   ['roteKind','roteViol','roteOct','roteStr','roteRange','roteLen'].forEach(id=>$(id).disabled=true);
   openFold('pRote',false);   // (the drill runs under the neck, so the menu folds up to make room)
   clearInterval(roteTimer);if(rote.limit)roteTimer=setInterval(()=>{if(!rote.on)return clearInterval(roteTimer);if(Date.now()>=rote.end)roteFinish();else roteScore();},250);
