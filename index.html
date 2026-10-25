@@ -194,6 +194,14 @@ span.pname{min-width:0;color:#6e4f28}
       <option value="thirds">Major scale in thirds</option>
       <option value="frets">Each string, frets 0 to 4 and back</option>
       <option value="cross">String crossing, neighbouring open strings</option>
+      <option value="lowStep">Low notes: step down from the staff and back</option>
+      <option value="lowLeap">Low notes: leaps from the bottom line</option>
+      <option value="lowLines">Low notes: the ledger lines, then the spaces</option>
+      <option value="lowOct">Low notes: a note on the staff, then its octave below</option>
+      <option value="highStep">High notes: step up from the staff and back</option>
+      <option value="highLeap">High notes: leaps from the top line</option>
+      <option value="highLines">High notes: the ledger lines, then the spaces</option>
+      <option value="highOct">High notes: a note on the staff, then its octave above</option>
     </select></label>
     <label>Starting on <select id="exStart"></select></label>
     <label>Octaves <select id="exOct"><option value="1">1</option><option value="2" selected>2</option></select></label>
@@ -217,6 +225,7 @@ span.pname{min-width:0;color:#6e4f28}
     <label>Viol <select id="roteViol"><option value="treble">Treble</option><option value="tenor" selected>Tenor</option><option value="bass">Bass</option></select></label>
     <label id="roteOctL">Names <select id="roteOct"><option value="0">any octave (F♯)</option><option value="1">with the octave (F♯3)</option></select></label>
     <label>Strings <select id="roteStr"></select></label>
+    <label>Notes <select id="roteRange"><option value="all">all</option><option value="low">low, below the staff</option><option value="high">high, above the staff</option><option value="ledger">low and high</option><option value="staff">on the staff</option></select></label>
     <label>Round <select id="roteLen"><option value="0">until Finish</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option></select></label>
     <button id="roteGo">Start</button>
   </div>
@@ -329,7 +338,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='2.7';
+const APP_VERSION='2.8';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -370,7 +379,7 @@ try{const n=JSON.parse(localStorage.getItem('tenor-viol-necks')||'null');if(Arra
   const pl=localStorage.getItem('tenor-viol-place');if(pl==='low'||pl==='high')st.place=pl;}catch(e){}
 st.sv=st.necks.includes('tenor')?'tenor':st.necks[0];
 // rote: a drill in progress (it has the neck of its viol to itself)
-const rote={on:false,kind:'find',viol:'tenor',oct:false,str:-1,limit:0,end:0,right:0,total:0,streak:0,t0:0,target:null,wait:false};
+const rote={on:false,kind:'find',viol:'tenor',oct:false,str:-1,range:'all',limit:0,end:0,right:0,total:0,streak:0,t0:0,target:null,wait:false};
 const keep=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,typeof v==='string'?v:JSON.stringify(v));}catch(e){}};
 
 for(let i=3;i<=9;i++){const o=document.createElement('option');o.value=i;o.textContent=i;if(i==7)o.selected=true;$('frets').append(o);}
@@ -608,7 +617,7 @@ function dotsSvg(v,W,H,compact,notes){
     if(!rote.on&&!allowed(p.m))return;   // (a drill uses all twelve notes)
     const hl=st.hl[p.k],lab=spell(p.m).pcname,x=X(p.f),y=top+p.s*gap;
     if(hl){lit.push({p,hl,lab,x,y});return;}
-    const w=pk.get(p.k),inP=w!=null,op=rote.on&&rote.str>=0&&p.s!==rote.str?'.3':dim?(inP?'.8':'.3'):(pk.size&&!inP?'.62':'');
+    const w=pk.get(p.k),inP=w!=null,op=rote.on&&(rote.str>=0&&p.s!==rote.str||!roteRangeOk(p.m))?'.3':dim?(inP?'.8':'.3'):(pk.size&&!inP?'.62':'');
     s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"${op?` opacity="${op}"`:''}>`+
        (inP?`<circle class="rg" cx="${x}" cy="${y}" r="${(19+6*w).toFixed(1)}" fill="${rc}" opacity="${(0.25+0.6*Math.pow(w,0.7)).toFixed(2)}"/>`:'')+
        `<circle cx="${x}" cy="${y}" r="15" fill="${NAT.includes(pc(p.m))?'#f2e7cc':'#ccb489'}" stroke="${inP?rc:'#24140a'}" stroke-width="${inP?3:1.5}"/>`+
@@ -915,7 +924,11 @@ const EX_INFO={
   harm:'Harmonic minor: the 7th is raised, going up and coming down.',mel:'Melodic minor: 6th and 7th raised going up, natural coming down.',
   chrom:'Every semitone (every fret), up and down.',arpMaj:'The notes of the major chord, up and down.',arpMin:'The notes of the minor chord, up and down.',
   thirds:'The major scale in pairs a third apart: 1-3, 2-4, 3-5 ...',frets:'On each string from the lowest: open, frets 1, 2, 3, 4, and back to open.',
-  cross:'Neighbouring open strings in turn: G-C, C-F, F-A, A-D, D-G and back.'};
+  cross:'Neighbouring open strings in turn: G-C, C-F, F-A, A-D, D-G and back.',
+  lowStep:'From the bottom line of the staff down by step to the lowest note, and back up.',lowLeap:'The bottom line, then each note below it in turn: a step, a third, a fourth ... so each ledger note is read from the line you know.',
+  lowLines:'The notes on the ledger lines below the staff, down and up, then the notes in the spaces between them.',lowOct:'A note on the staff, then the same note an octave lower, below the staff.',
+  highStep:'From the top line of the staff up by step to the highest note, and back down.',highLeap:'The top line, then each note above it in turn: a step, a third, a fourth ...',
+  highLines:'The notes on the ledger lines above the staff, up and down, then the notes in the spaces.',highOct:'A note on the staff, then the same note an octave higher, above the staff.'};
 const EX_STEPS={major:[2,2,1,2,2,2,1],minor:[2,1,2,2,1,2,2],harm:[2,1,2,2,1,3,1],chrom:[1,1,1,1,1,1,1,1,1,1,1,1],arpMaj:[4,3,5],arpMin:[3,4,5]};
 const PC_NAMES=['C','C♯/D♭','D','E♭','E','F','F♯/G♭','G','A♭','A','B♭','B'];
 PC_NAMES.forEach((n,i)=>{const o=document.createElement('option');o.value=i;o.textContent=n;if(i===7)o.selected=true;$('exStart').append(o);});
@@ -928,6 +941,22 @@ function makeExercise(){
   if(kind==='open'){const up=OPEN.slice().reverse();notes=up.concat(up.slice(0,-1).reverse());title='Open strings';}
   else if(kind==='cross'){const s=OPEN.slice().reverse();for(let i=0;i<5;i++)notes.push(s[i],s[i+1],s[i],s[i+1]);for(let i=4;i>=0;i--)notes.push(s[i+1],s[i],s[i+1],s[i]);title='String crossing';}
   else if(kind==='frets'){OPEN.slice().reverse().forEach(o=>{for(let f=0;f<=4;f++)notes.push(o+f);for(let f=3;f>=0;f--)notes.push(o+f);});title='Frets 0 to 4 on each string';}
+  else if(/^(low|high)/.test(kind)){
+    // notes below or above the staff (in the Clef chosen under Settings), in the key of the note chosen under Starting on
+    key=majorKeyOf(pc);
+    const [,,bd,td]=staffLimits(st.clef),ka=keyAcc(key),at=d=>{const L=LET[((d%7)+7)%7];return 12*(Math.floor(d/7)+1)+BASE[L]+ka[L];};
+    const lo=OPEN[5],hi=top,low=kind.startsWith('low'),edge=low?bd:td,dir=low?-1:1,inR=d=>at(d)>=lo&&at(d)<=hi;
+    let far=edge;while(inR(far+dir))far+=dir;   // the farthest note from the staff the viol can play
+    const steps=[];for(let d=edge;d!==far+dir;d+=dir)steps.push(d);
+    const t=kind.slice(low?3:4);
+    if(t==='Step')notes=steps.concat(steps.slice(0,-1).reverse()).map(at);
+    else if(t==='Leap'){for(let i=1;i<steps.length;i++)notes.push(at(edge),at(steps[i]));notes.push(at(edge));}
+    else if(t==='Lines'){const lines=steps.filter((d,i)=>i>0&&i%2===0),spaces=steps.filter((d,i)=>i%2===1);
+      [lines,spaces].forEach(g=>{if(g.length)notes.push(...g.concat(g.slice(0,-1).reverse()).map(at));});}
+    else{for(let d=edge+(low?1:-1)*1;Math.abs(d-edge)<=7;d-=dir){if(inR(d+7*dir)&&(low?d+7*dir<edge:d+7*dir>edge))notes.push(at(d),at(d+7*dir));}}   // (octave pairs)
+    if(!notes.length){notes=[at(edge)];note=' The viol has no notes '+(low?'below':'above')+' the staff in this clef.';}
+    title=$('exKind').selectedOptions[0].textContent;
+  }
   else{
     const steps=kind==='thirds'?EX_STEPS.major:kind==='mel'?[2,1,2,2,2,2,1]:EX_STEPS[kind];
     let start=lowest(pc);
@@ -948,7 +977,7 @@ function makeExercise(){
   items[0].sec={k:key,ts:[4,4],title};
   return {items,key,title,note};
 }
-$('exKind').onchange=()=>{$('exInfo').textContent=EX_INFO[$('exKind').value];};
+$('exKind').onchange=()=>{const k=$('exKind').value;$('exInfo').textContent=EX_INFO[k]+(/^(low|high)/.test(k)?' '+ledgerGuide('tenor',k.startsWith('low')?'low':'high'):'');};
 $('exInfo').textContent=EX_INFO.open;
 $('exGo').onclick=()=>{
   if(sc.parts.some(p=>p.items.length)&&!confirm('Replace the score with this exercise?'))return;
@@ -2045,7 +2074,7 @@ function roteSpell(m){   // a note to show on the staff, spelt with a sharp or a
   const nm=([1,3,6,8,10].includes(pc(m))&&Math.random()<0.5?FLAT:SHARP)[pc(m)],off=nm.includes('♯')?1:nm.includes('♭')?-1:0,oct=Math.floor((m-off)/12)-1;
   return {m,name:nm+oct,vf:nm[0].toLowerCase()+(off>0?'#':off<0?'b':''),oct,acc:off>0?'#':off<0?'b':null};
 }
-const roteNow=()=>({at:new Date().toISOString(),kind:rote.kind,viol:rote.viol,oct:rote.oct,str:rote.str,limit:rote.limit,right:rote.right,total:rote.total,secs:Math.round((Date.now()-rote.t0)/1000)});
+const roteNow=()=>({at:new Date().toISOString(),kind:rote.kind,viol:rote.viol,oct:rote.oct,str:rote.str,range:rote.range,limit:rote.limit,right:rote.right,total:rote.total,secs:Math.round((Date.now()-rote.t0)/1000)});
 const roteSaveNow=()=>{try{localStorage.setItem('tenor-viol-rote-now',JSON.stringify(roteNow()));}catch(e){}};   // (in case the page is closed before Finish)
 function roteScore(){
   let t=rote.total?`Right ${rote.right} of ${rote.total} (${Math.round(100*rote.right/rote.total)}%)`+(rote.streak>1?`, ${rote.streak} in a row`:''):'Right 0 of 0';
@@ -2053,7 +2082,29 @@ function roteScore(){
   $('roteScore').textContent=t;
 }
 const strOk=s=>rote.str<0||s===rote.str;
-function rotePool(){const ps=positions(rote.viol),f=ps.filter(p=>strOk(p.s));return f.length?f:ps;}
+function rotePool(){const ps=positions(rote.viol),f=ps.filter(p=>strOk(p.s)&&roteRangeOk(p.m));return f.length?f:ps;}
+// low and high notes: below the bottom line or above the top line of the viol's staff (in its clef)
+const ROTE_RANGES={low:'low notes',high:'high notes',ledger:'low and high notes',staff:'notes on the staff'};
+function staffLimits(clef){   // the pitches of the bottom and top lines
+  const [L,O]=CLEF_TOP[clef]||CLEF_TOP.alto,td=O*7+LET.indexOf(L),nat=d=>12*(Math.floor(d/7)+1)+BASE[LET[((d%7)+7)%7]];
+  return [nat(td-8),nat(td),td-8,td];
+}
+function roteRangeOk(m){
+  if(rote.range==='all')return true;
+  const [bl,tl]=staffLimits(VIOLS[rote.viol].clef||st.clef);
+  return rote.range==='low'?m<bl:rote.range==='high'?m>tl:rote.range==='ledger'?m<bl||m>tl:m>=bl&&m<=tl;
+}
+// where the notes below or above the staff are written, for the viol and its clef (with its open strings named)
+function ledgerGuide(viol,which){
+  const V=VIOLS[viol],clef=V.clef||st.clef,[,,bd,td]=staffLimits(clef),lo=V.open[5],hi=V.open[0]+st.frets;
+  const nat=d=>12*(Math.floor(d/7)+1)+BASE[LET[((d%7)+7)%7]],name=d=>LET[((d%7)+7)%7]+Math.floor(d/7);
+  const place=(n,dir)=>n===1?`in the space ${dir==='below'?'under':'over'} the staff`:n%2===0?`on ledger line ${n/2} ${dir}`:`in the space ${dir==='below'?'under':'over'} ledger line ${(n-1)/2}`;
+  const open=m=>{const s=V.open.indexOf(m);return s<0?'':` (the open ${['1st','2nd','3rd','4th','5th','6th'][s]} string)`;};
+  const out=[];
+  if(which!=='high'){const l=[];for(let n=1;nat(bd-n)>=lo;n++)l.push(`${name(bd-n)} ${place(n,'below')}${open(nat(bd-n))}`);if(l.length)out.push(`Below the staff (${CLEF_NAME[clef]||''}, bottom line ${name(bd)}): `+l.join('; ')+'.');}
+  if(which!=='low'){const l=[];for(let n=1;nat(td+n)<=hi;n++)l.push(`${name(td+n)} ${place(n,'above')}`);if(l.length)out.push(`Above the staff (top line ${name(td)}${open(nat(td)).replace(' (',', ').replace(')','')}): `+l.join('; ')+'.');}
+  return out.join(' ');
+}
 // notes on the little staff, in the viol's clef: the one to play now in blue, the ones played in green or red
 function roteStaffDraw(notes,cur,marks,tall){
   const el=$('roteStaff');el.innerHTML='';el.classList.toggle('tap',!!tall);
@@ -2108,7 +2159,7 @@ function roteTap(v,s,f){
   const K=rote.kind,t=rote.target;if(rote.wait||!t||!['find','sfind','same','line'].includes(K))return;
   const m=VIOLS[violAt(v)].open[s]+f,key=hk(v,s,f);
   if(K==='line'){roteLineTap(m,s,key);return;}
-  roteMark(K==='find'?(rote.oct?m===t.m:pc(m)===pc(t.m))&&strOk(s):K==='sfind'?m===t.m&&strOk(s):m===t.m&&key!==t.k,m,key);
+  roteMark(K==='find'?(rote.oct?m===t.m:pc(m)===pc(t.m))&&strOk(s)&&roteRangeOk(m):K==='sfind'?m===t.m&&strOk(s):m===t.m&&key!==t.k,m,key);
 }
 function roteAnswer(p){
   const K=rote.kind,t=rote.target;if(!rote.on||rote.wait||!t||(K!=='name'&&K!=='sname'))return;
@@ -2117,7 +2168,7 @@ function roteAnswer(p){
 // the right places for the note asked, in green
 function roteShow(t){
   const K=rote.kind;
-  positions(rote.viol).filter(p=>K==='find'?(rote.oct?p.m===t.m:pc(p.m)===pc(t.m))&&strOk(p.s):K==='same'?p.m===t.m&&p.k!==t.k:p.m===t.m&&(K!=='sfind'||strOk(p.s))).forEach(p=>st.hl[p.k]='#6fbf73');
+  positions(rote.viol).filter(p=>K==='find'?(rote.oct?p.m===t.m:pc(p.m)===pc(t.m))&&strOk(p.s)&&roteRangeOk(p.m):K==='same'?p.m===t.m&&p.k!==t.k:p.m===t.m&&(K!=='sfind'||strOk(p.s))).forEach(p=>st.hl[p.k]='#6fbf73');
 }
 function roteMark(ok,m,key,pressed){
   const t=rote.target,K=rote.kind;rote.wait=true;rote.total++;if(ok){rote.right++;rote.streak++;}else rote.streak=0;
@@ -2170,13 +2221,13 @@ let roteTimer=0;
 function roteStart(){
   stopPlay();if(rec.on)stopRec();
   if(st.mode!=='explore'){$('mode').value='explore';setMode();}   // (the quizzes in Settings use the neck too)
-  Object.assign(rote,{on:true,kind:$('roteKind').value,viol:$('roteViol').value,oct:$('roteOct').value==='1',str:+$('roteStr').value,limit:+$('roteLen').value,
+  Object.assign(rote,{on:true,kind:$('roteKind').value,viol:$('roteViol').value,oct:$('roteOct').value==='1',str:+$('roteStr').value,range:$('roteRange').value,limit:+$('roteLen').value,
     right:0,total:0,streak:0,t0:Date.now(),target:null});
   rote.end=rote.t0+rote.limit*1000;
   st.hideLabels=true;
   $('roteGo').style.display='none';$('roteBar').style.display='';
   $('roteNames').style.display=rote.kind==='name'||rote.kind==='sname'?'':'none';$('roteAcc').style.display=rote.kind==='nstaff'?'':'none';$('roteMsg').textContent='A drill is running: Finish is under the neck.';
-  ['roteKind','roteViol','roteOct','roteStr','roteLen'].forEach(id=>$(id).disabled=true);
+  ['roteKind','roteViol','roteOct','roteStr','roteRange','roteLen'].forEach(id=>$(id).disabled=true);
   openFold('pRote',false);   // (the drill runs under the neck, so the menu folds up to make room)
   clearInterval(roteTimer);if(rote.limit)roteTimer=setInterval(()=>{if(!rote.on)return clearInterval(roteTimer);if(Date.now()>=rote.end)roteFinish();else roteScore();},250);
   roteScore();roteNext();
@@ -2187,11 +2238,11 @@ function roteFinish(){
   const r=roteNow();if(r.total)roteKeep(r);try{localStorage.removeItem('tenor-viol-rote-now');}catch(e){}
   rote.on=false;rote.target=null;st.hl={};st.hlBlank=null;st.hideLabels=false;
   $('roteGo').style.display='';$('roteBar').style.display='none';
-  ['roteKind','roteViol','roteOct','roteStr','roteLen'].forEach(id=>$(id).disabled=false);
+  ['roteKind','roteViol','roteOct','roteStr','roteRange','roteLen'].forEach(id=>$(id).disabled=false);
   $('roteMsg').textContent=r.total?`${rote.limit?'Time is up. ':''}You got ${r.right} out of ${r.total} (${Math.round(100*r.right/r.total)}%), ${(r.secs/r.total).toFixed(1)} seconds each. It is in the record below.`:'Nothing was answered, so nothing was kept.';
   drawNecks();roteTable();openFold('pRote',true);   // (the mark and the record)
 }
-const roteWhat=r=>(ROTE_KINDS[r.kind]||r.kind)+(r.kind==='find'&&r.oct?', with octave':'')+(r.str>=0?`, string ${r.str+1}`:'')+(r.limit?`, ${r.limit/60} min`:'');
+const roteWhat=r=>(ROTE_KINDS[r.kind]||r.kind)+(r.kind==='find'&&r.oct?', with octave':'')+(r.str>=0?`, string ${r.str+1}`:'')+(ROTE_RANGES[r.range]?', '+ROTE_RANGES[r.range]:'')+(r.limit?`, ${r.limit/60} min`:'');
 function roteTable(){
   const l=roteLog(),T=$('roteLog');
   if(!l.length){T.innerHTML='<p class="score">No rounds yet.</p>';$('roteClear').style.display='none';return;}
@@ -2203,11 +2254,15 @@ function roteTable(){
 }
 // the strings of the viol chosen, to keep a drill to one of them
 function roteStrings(){const S=$('roteStr'),keep=S.value;S.innerHTML='<option value="-1">all</option>'+VIOLS[$('roteViol').value].open.map((o,i)=>`<option value="${i}">${i+1} (${strName(o)})</option>`).join('');S.value=[...S.options].some(o=>o.value===keep)?keep:'-1';}
-function roteKindUI(){const k=$('roteKind').value;$('roteOctL').style.display=k==='find'?'':'none';$('roteInfo').textContent=ROTE_INFO[k];}
+function roteKindUI(){
+  const k=$('roteKind').value,rg=$('roteRange').value;$('roteOctL').style.display=k==='find'?'':'none';
+  $('roteInfo').textContent=ROTE_INFO[k]+(rg==='low'||rg==='high'||rg==='ledger'?' '+ledgerGuide($('roteViol').value,rg):'');   // (where those notes are written)
+}
 $('roteGo').onclick=roteStart;
 $('roteEnd').onclick=roteFinish;
 $('roteKind').onchange=roteKindUI;
-$('roteViol').onchange=roteStrings;
+$('roteViol').onchange=()=>{roteStrings();roteKindUI();};
+$('roteRange').onchange=roteKindUI;
 $('roteClear').onclick=()=>{const n=roteLog().length;if(n&&confirm(`Delete all ${n} rounds in the record? This cannot be undone.`)){try{localStorage.removeItem('tenor-viol-rote');}catch(e){}roteTable();}};
 roteStrings();roteKindUI();
 // a round that was going when the page was closed (or reloaded) goes into the record
