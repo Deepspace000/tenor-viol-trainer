@@ -313,7 +313,7 @@ span.pname{min-width:0;color:#6e4f28}
 
 <div id="neckWrap"></div>
 <div id="roteBar" style="display:none">
-  <div class="rote-ask"><span id="roteAsk"></span><div id="roteStaff" style="display:none"></div><span id="roteHow"></span><span id="roteAcc" class="grp" style="display:none"><button data-a="-1" title="Flat">♭</button><button data-a="0" class="on" title="Natural">♮</button><button data-a="1" title="Sharp">♯</button></span><span id="roteMove" class="grp" style="display:none"><button id="roteUp" title="Move the note up a line or space (up arrow)">▲ Up</button><button id="roteDown" title="Move the note down a line or space (down arrow)">▼ Down</button><button id="roteCheck" title="Is the note in the right place? (Enter)">Check</button></span><span id="roteScore"></span><button id="roteEnd">Finish</button></div>
+  <div class="rote-ask"><span id="roteAsk"></span><div id="roteStaff" style="display:none"></div><span id="roteHow"></span><span id="roteAcc" class="grp" style="display:none"><button data-a="-1" title="Flat">♭</button><button data-a="0" class="on" title="Natural">♮</button><button data-a="1" title="Sharp">♯</button></span><span id="roteMove" class="grp" style="display:none"><button id="roteUp" title="Move the note up a line or space (up arrow)">▲ Up</button><button id="roteDown" title="Move the note down a line or space (down arrow)">▼ Down</button><button id="roteCheck" title="Is the note in the right place? (Enter)">Check</button></span><span id="roteScore"></span><span id="roteSize" class="grp" style="display:none"><button id="roteSmaller" title="A smaller staff">Staff −</button><button id="roteBigger" title="A bigger staff">Staff +</button></span><button id="roteEnd">Finish</button></div>
   <div class="rote-names" id="roteNames"></div>
 </div>
 <div id="statusLine"><span id="msg"></span><span class="score" id="recstat"></span></div>
@@ -339,7 +339,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='2.9';
+const APP_VERSION='3.0';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -369,7 +369,7 @@ const SHARP=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const FLAT =['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
 const NAT=[0,2,4,5,7,9,11];
 const st={mode:'explore',clef:'alto',acc:'all',key:0,frets:7,labels:true,sound:true,
-  show:[],target:null,answered:false,right:0,total:0,streak:0,pending:null,hl:{},necks:['tenor'],sv:'tenor',neckFrac:null,zoom:1,follow:true,pulse:{},place:'all'};
+  show:[],target:null,answered:false,right:0,total:0,streak:0,pending:null,hl:{},necks:['tenor'],sv:'tenor',neckFrac:null,zoom:1,follow:true,pulse:{},place:'all',roteSize:1.3};
 // remembered on this device: the necks shown, the room they take (the bar above the score), the size of the music
 // and Follow score.
 // st.sv is the viol whose notes the staff under Settings shows.
@@ -377,7 +377,8 @@ try{const n=JSON.parse(localStorage.getItem('tenor-viol-necks')||'null');if(Arra
   const f=+localStorage.getItem('tenor-viol-neckh');if(f>0.03&&f<0.9)st.neckFrac=f;
   const z=+localStorage.getItem('tenor-viol-zoom');if(z>=0.6&&z<=1.6)st.zoom=z;
   st.follow=localStorage.getItem('tenor-viol-follow')!=='0';
-  const pl=localStorage.getItem('tenor-viol-place');if(pl==='low'||pl==='high')st.place=pl;}catch(e){}
+  const pl=localStorage.getItem('tenor-viol-place');if(pl==='low'||pl==='high')st.place=pl;
+  const rs=+localStorage.getItem('tenor-viol-rotesize');if(rs>=0.8&&rs<=3)st.roteSize=rs;}catch(e){}
 st.sv=st.necks.includes('tenor')?'tenor':st.necks[0];
 // rote: a drill in progress (it has the neck of its viol to itself)
 const rote={on:false,kind:'find',viol:'tenor',oct:false,str:-1,range:'all',limit:0,end:0,right:0,total:0,streak:0,t0:0,target:null,wait:false};
@@ -2109,25 +2110,32 @@ function ledgerGuide(viol,which){
 }
 // notes on the little staff, in the viol's clef: the one to play now in blue, the ones played in green or red
 function roteStaffDraw(notes,cur,marks,tall){
+  rote.lastDraw=[notes,cur,marks,tall];   // (drawn again at a new size)
   const el=$('roteStaff');el.innerHTML='';el.classList.toggle('tap',!!tall);
-  const clef=VIOLS[rote.viol].clef||st.clef,vfClef=clef==='treble8'?'treble':clef,shift=clef==='treble8'?1:0;
-  const W=notes.length>1&&!tall?Math.max(300,Math.min(520,($('roteBar').clientWidth||600)-40)):tall?260:190,H=tall?170:134;
+  const clef=VIOLS[rote.viol].clef||st.clef,vfClef=clef==='treble8'?'treble':clef,shift=clef==='treble8'?1:0,k=st.roteSize;
+  const W=notes.length>1&&!tall?Math.max(300,Math.min(520,(($('roteBar').clientWidth||600)-40)/k)):tall?260:190,H=tall?170:134;
   const r=new Renderer(el,Renderer.Backends.SVG);r.resize(W,H);const ctx=r.getContext();
   const stave=new Stave(4,tall?25:12,W-8);if(clef==='treble8')stave.addClef('treble','default','8vb');else stave.addClef(clef);stave.setContext(ctx).draw();
   rote.stave=stave;
-  if(!notes.length){const svg=el.querySelector('svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.style.width=W+'px';svg.style.maxWidth='100%';svg.style.height='auto';return;}
+  if(!notes.length){const svg=el.querySelector('svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.style.width=Math.round(W*k)+'px';svg.style.maxWidth='100%';svg.style.height='auto';return;}
   const sns=notes.map((n,i)=>{const sn=new StaveNote({keys:[n.vf+'/'+(n.oct+shift)],duration:notes.length>1&&!tall?'q':'w',clef:vfClef});
     if(n.acc)sn.addModifier(new Accidental(n.acc));
     const c=marks[i]!=null?(marks[i]?'#2d8a3a':'#c0392b'):i===cur?'#1f5fbf':null;if(c)sn.setStyle({fillStyle:c,strokeStyle:c});return sn;});
   const v=new Voice({num_beats:notes.length>1?notes.length*(tall?4:1):4,beat_value:4}).setStrict(false);v.addTickables(sns);
   new Formatter().joinVoices([v]).format([v],W-(notes.length>1?90:70));v.draw(ctx,stave);
-  const svg=el.querySelector('svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.style.width=W+'px';svg.style.maxWidth='100%';svg.style.height='auto';
+  const svg=el.querySelector('svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.style.width=Math.round(W*k)+'px';svg.style.maxWidth='100%';svg.style.height='auto';
 }
+function roteResize(n){
+  st.roteSize=Math.round(Math.max(0.8,Math.min(3,st.roteSize+n))*10)/10;keep('tenor-viol-rotesize',String(st.roteSize));
+  if(rote.on&&rote.lastDraw&&$('roteStaff').style.display!=='none')roteStaffDraw(...rote.lastDraw);
+}
+$('roteSmaller').onclick=()=>roteResize(-0.2);
+$('roteBigger').onclick=()=>roteResize(0.2);
 function roteNext(){
   if(!rote.on)return;
   const K=rote.kind,all=positions(rote.viol),prev=rote.target;let pool=rotePool();
   rote.wait=false;st.hl={};st.hlBlank=null;
-  const staff=K==='sfind'||K==='sname'||K==='line'||K==='nstaff';$('roteStaff').style.display=staff?'':'none';$('roteAsk').style.display=staff?'none':'';
+  const staff=K==='sfind'||K==='sname'||K==='line'||K==='nstaff';$('roteStaff').style.display=$('roteSize').style.display=staff?'':'none';$('roteAsk').style.display=staff?'none':'';
   if(K==='same'){const two=q=>all.some(o=>o.m===q.m&&o.k!==q.k);pool=pool.filter(two);if(!pool.length)pool=all.filter(two);}   // (notes with another place)
   if(K==='line'){
     // six notes that move like a tune, up and down in small steps through the notes of the round
