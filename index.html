@@ -80,11 +80,16 @@ input[type=range],input[type=checkbox]{accent-color:var(--rub)}
 .ok{color:var(--ok)}.bad{color:var(--bad)}
 .names{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
 .names button{min-width:44px;font-size:18px}
-/* rote: the question in large letters, and the twelve note names to press */
-.rote-ask{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin:8px 0 2px}
-#roteAsk{font:bold 46px 'Times New Roman',Times,serif;color:var(--rub);min-width:60px;line-height:1.1}
-#roteScore{font-size:16px;color:#4a2c12}
-.rote-names button{min-width:66px;font-size:19px;padding:8px 6px}
+/* rote: while a drill runs, a strip under the neck holds the question, the mark, Finish and the twelve note names */
+#roteBar{flex:none;color:var(--inkd);background:var(--parch);border:1px solid var(--edge);border-radius:3px;box-shadow:inset 0 0 0 2px var(--parch),inset 0 0 0 3px #a8834a,0 3px 8px rgba(0,0,0,.6);padding:6px 12px 8px}
+.rote-ask{display:flex;align-items:center;gap:6px 16px;flex-wrap:wrap}
+#roteAsk{font:bold 40px 'Times New Roman',Times,serif;color:var(--rub);min-width:52px;line-height:1.1}
+#roteHow{font-size:16px;color:#4a2c12;flex:1;min-width:180px}
+#roteScore{font-size:16px;color:#4a2c12;white-space:nowrap}
+#roteStaff{flex:none;background:#fff;border:1px solid #a8834a;border-radius:2px;line-height:0}
+#roteStaff svg{display:block}
+.rote-names{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin-top:6px}
+.rote-names button{font-size:19px;padding:8px 4px}
 .score{color:var(--dim);font-size:14px}
 table{border-collapse:collapse;font-size:15px}
 td,th{border-bottom:1px solid #b89a62;padding:3px 10px;text-align:left}
@@ -198,17 +203,22 @@ span.pname{min-width:0;color:#6e4f28}
 
 <div class="foldp" id="pRote">
   <div class="controls">
-    <label>Drill <select id="roteKind"><option value="find">Find the note on the neck</option><option value="name">Name the note on the neck</option></select></label>
+    <label>Drill <select id="roteKind">
+      <option value="find">Find the note on the neck</option>
+      <option value="name">Name the note on the neck</option>
+      <option value="sfind">Read the staff: find it on the neck</option>
+      <option value="sname">Read the staff: name it</option>
+      <option value="line">Read a line of music on the neck</option>
+      <option value="same">Same note, another place</option>
+    </select></label>
     <label>Viol <select id="roteViol"><option value="treble">Treble</option><option value="tenor" selected>Tenor</option><option value="bass">Bass</option></select></label>
     <label id="roteOctL">Names <select id="roteOct"><option value="0">any octave (F♯)</option><option value="1">with the octave (F♯3)</option></select></label>
-    <button id="roteGo">Start</button><button id="roteEnd" style="display:none">Finish</button>
+    <label>Strings <select id="roteStr"></select></label>
+    <label>Round <select id="roteLen"><option value="0">until Finish</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option></select></label>
+    <button id="roteGo">Start</button>
   </div>
-  <div id="roteBoard" style="display:none">
-    <div class="rote-ask"><span id="roteAsk"></span><span id="roteHow" class="score"></span></div>
-    <div id="roteScore"></div>
-    <div class="names rote-names" id="roteNames"></div>
-  </div>
-  <div class="score" id="roteMsg" style="margin-top:6px"></div>
+  <div id="roteInfo" style="margin-top:6px"></div>
+  <div class="score" id="roteMsg" style="margin-top:4px">The drill runs under the neck: the question, your mark, Finish, and the note names to press. Short rounds every day work best; a timed round shows how fast you are getting.</div>
   <div id="roteRec"><h3>Record</h3><div id="roteLog"></div><button id="roteClear" style="margin-top:8px">Delete the record</button></div>
 </div>
 
@@ -289,6 +299,10 @@ span.pname{min-width:0;color:#6e4f28}
 </div>
 
 <div id="neckWrap"></div>
+<div id="roteBar" style="display:none">
+  <div class="rote-ask"><span id="roteAsk"></span><div id="roteStaff" style="display:none"></div><span id="roteHow"></span><span id="roteScore"></span><button id="roteEnd">Finish</button></div>
+  <div class="rote-names" id="roteNames"></div>
+</div>
 <div id="statusLine"><span id="msg"></span><span class="score" id="recstat"></span></div>
 <div id="splitBar" title="Drag up or down to change the size of the necks and the score (double-click: back to normal)"><span></span></div>
 <div id="scoreBox"><h2 id="rectitle"></h2><div id="recscore"></div></div>
@@ -312,7 +326,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='2.4';
+const APP_VERSION='2.6';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -353,7 +367,7 @@ try{const n=JSON.parse(localStorage.getItem('tenor-viol-necks')||'null');if(Arra
   const pl=localStorage.getItem('tenor-viol-place');if(pl==='low'||pl==='high')st.place=pl;}catch(e){}
 st.sv=st.necks.includes('tenor')?'tenor':st.necks[0];
 // rote: a drill in progress (it has the neck of its viol to itself)
-const rote={on:false,kind:'find',viol:'tenor',oct:false,right:0,total:0,streak:0,t0:0,target:null,wait:false};
+const rote={on:false,kind:'find',viol:'tenor',oct:false,str:-1,limit:0,end:0,right:0,total:0,streak:0,t0:0,target:null,wait:false};
 const keep=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,typeof v==='string'?v:JSON.stringify(v));}catch(e){}};
 
 for(let i=3;i<=9;i++){const o=document.createElement('option');o.value=i;o.textContent=i;if(i==7)o.selected=true;$('frets').append(o);}
@@ -591,7 +605,7 @@ function dotsSvg(v,W,H,compact,notes){
     if(!rote.on&&!allowed(p.m))return;   // (a drill uses all twelve notes)
     const hl=st.hl[p.k],lab=spell(p.m).pcname,x=X(p.f),y=top+p.s*gap;
     if(hl){lit.push({p,hl,lab,x,y});return;}
-    const w=pk.get(p.k),inP=w!=null,op=dim?(inP?'.8':'.3'):(pk.size&&!inP?'.62':'');
+    const w=pk.get(p.k),inP=w!=null,op=rote.on&&rote.str>=0&&p.s!==rote.str?'.3':dim?(inP?'.8':'.3'):(pk.size&&!inP?'.62':'');
     s+=`<g class="dot" data-s="${p.s}" data-f="${p.f}"${op?` opacity="${op}"`:''}>`+
        (inP?`<circle class="rg" cx="${x}" cy="${y}" r="${(19+6*w).toFixed(1)}" fill="${rc}" opacity="${(0.25+0.6*Math.pow(w,0.7)).toFixed(2)}"/>`:'')+
        `<circle cx="${x}" cy="${y}" r="15" fill="${NAT.includes(pc(p.m))?'#f2e7cc':'#ccb489'}" stroke="${inP?rc:'#24140a'}" stroke-width="${inP?3:1.5}"/>`+
@@ -1927,7 +1941,7 @@ function openFold(id,open){
 // an open menu never pushes the score off the screen: it scrolls inside itself instead
 function fitFold(){
   const f=document.querySelector('.foldp.open');if(!f)return;
-  const rest=['topbar','neckWrap','statusLine','splitBar'].reduce((a,id)=>a+$(id).getBoundingClientRect().height,0);
+  const rest=['topbar','neckWrap','roteBar','statusLine','splitBar'].reduce((a,id)=>a+$(id).getBoundingClientRect().height,0);
   f.style.maxHeight=Math.round(Math.max(110,Math.min(innerHeight*0.46,innerHeight-rest-30-14-150)))+'px';
 }
 document.querySelectorAll('.fold').forEach(b=>b.onclick=()=>openFold(b.dataset.p,!$(b.dataset.p).classList.contains('open')));
@@ -2002,90 +2016,167 @@ addEventListener('keydown',e=>{
   else if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();$('undoBtn').click();}
 });
 /* ---------- rote: drills with a mark, kept by date and time ----------
-   Find the note: a note's name is shown and you tap the neck where it is (any place it can be played counts; with the
-   octave, only that octave). Name the note: a place on the neck lights up and you press its name. They go on until you
-   press Finish. Every round is kept on this device with its date, time and mark (a round left unfinished is kept too). */
+   Six drills on the neck of the viol chosen (the tenor viol by default, which reads alto clef):
+   - Find the note: a note's name is shown; tap the neck where it is (any octave, or with the octave).
+   - Name the note: a place on the neck lights up; press its name.
+   - Read the staff, find it: a note on the staff in the viol's clef; tap it on the neck in the right octave.
+   - Read the staff, name it: a note on the staff; press its name.
+   - Read a line: six notes on the staff; play them on the neck one after another.
+   - Same note, another place: a note lights up with its name; tap the same note in another place.
+   A round goes on until Finish, or for a set time (as many as you can). It can keep to one string. Every round is kept
+   on this device with its date, time, mark and speed (a round left unfinished is kept too). */
+const ROTE_KINDS={find:'Find the note on the neck',name:'Name the note on the neck',sfind:'Read the staff: find it on the neck',sname:'Read the staff: name it',line:'Read a line of music on the neck',same:'Same note, another place'};
+const ROTE_INFO={find:"A note's name is shown: tap it on the neck.",name:'A place on the neck lights up: press its name.',
+  sfind:"A note is shown on the staff, in the viol's clef (alto clef for the tenor viol): tap it on the neck, in the right octave.",
+  sname:"A note is shown on the staff, in the viol's clef: press its name.",line:'Six notes are shown on the staff: play them on the neck one after another, as you would read them.',
+  same:'A note lights up with its name: tap the same note in another place on the neck.'};
 const NOTE_BTNS=[[0,'C'],[1,'C♯ D♭'],[2,'D'],[3,'D♯ E♭'],[4,'E'],[5,'F'],[6,'F♯ G♭'],[7,'G'],[8,'G♯ A♭'],[9,'A'],[10,'A♯ B♭'],[11,'B']];
 NOTE_BTNS.forEach(([p,t])=>{const b=document.createElement('button');b.textContent=t;b.onclick=()=>roteAnswer(p);$('roteNames').append(b);});
 function roteLog(){try{const l=JSON.parse(localStorage.getItem('tenor-viol-rote')||'[]');return Array.isArray(l)?l:[];}catch(e){return [];}}
 function roteKeep(r){const l=roteLog();l.unshift(r);try{localStorage.setItem('tenor-viol-rote',JSON.stringify(l.slice(0,2000)));}catch(e){}}
 // a black note is named with a sharp or a flat, at random, so both are learnt
 const roteName=(m,oct)=>([1,3,6,8,10].includes(pc(m))&&Math.random()<0.5?FLAT:SHARP)[pc(m)]+(oct?Math.floor(m/12)-1:'');
-const roteNow=()=>({at:new Date().toISOString(),kind:rote.kind,viol:rote.viol,oct:rote.oct,right:rote.right,total:rote.total,secs:Math.round((Date.now()-rote.t0)/1000)});
-function roteScore(){$('roteScore').textContent=rote.total?`Right ${rote.right} of ${rote.total} (${Math.round(100*rote.right/rote.total)}%)`+(rote.streak>1?`, ${rote.streak} in a row`:''):'Right 0 of 0';}
+function roteSpell(m){   // a note to show on the staff, spelt with a sharp or a flat
+  const nm=([1,3,6,8,10].includes(pc(m))&&Math.random()<0.5?FLAT:SHARP)[pc(m)],off=nm.includes('♯')?1:nm.includes('♭')?-1:0,oct=Math.floor((m-off)/12)-1;
+  return {m,name:nm+oct,vf:nm[0].toLowerCase()+(off>0?'#':off<0?'b':''),oct,acc:off>0?'#':off<0?'b':null};
+}
+const roteNow=()=>({at:new Date().toISOString(),kind:rote.kind,viol:rote.viol,oct:rote.oct,str:rote.str,limit:rote.limit,right:rote.right,total:rote.total,secs:Math.round((Date.now()-rote.t0)/1000)});
+const roteSaveNow=()=>{try{localStorage.setItem('tenor-viol-rote-now',JSON.stringify(roteNow()));}catch(e){}};   // (in case the page is closed before Finish)
+function roteScore(){
+  let t=rote.total?`Right ${rote.right} of ${rote.total} (${Math.round(100*rote.right/rote.total)}%)`+(rote.streak>1?`, ${rote.streak} in a row`:''):'Right 0 of 0';
+  if(rote.limit){const left=Math.max(0,Math.ceil((rote.end-Date.now())/1000));t+=`, ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')} left`;}
+  $('roteScore').textContent=t;
+}
+const strOk=s=>rote.str<0||s===rote.str;
+function rotePool(){const ps=positions(rote.viol),f=ps.filter(p=>strOk(p.s));return f.length?f:ps;}
+// notes on the little staff, in the viol's clef: the one to play now in blue, the ones played in green or red
+function roteStaffDraw(notes,cur,marks){
+  const el=$('roteStaff');el.innerHTML='';
+  const clef=VIOLS[rote.viol].clef||st.clef,vfClef=clef==='treble8'?'treble':clef,shift=clef==='treble8'?1:0;
+  const W=notes.length>1?Math.max(300,Math.min(520,($('roteBar').clientWidth||600)-40)):190,H=134;
+  const r=new Renderer(el,Renderer.Backends.SVG);r.resize(W,H);const ctx=r.getContext();
+  const stave=new Stave(4,12,W-8);if(clef==='treble8')stave.addClef('treble','default','8vb');else stave.addClef(clef);stave.setContext(ctx).draw();
+  const sns=notes.map((n,i)=>{const sn=new StaveNote({keys:[n.vf+'/'+(n.oct+shift)],duration:notes.length>1?'q':'w',clef:vfClef});
+    if(n.acc)sn.addModifier(new Accidental(n.acc));
+    const c=marks[i]!=null?(marks[i]?'#2d8a3a':'#c0392b'):i===cur?'#1f5fbf':null;if(c)sn.setStyle({fillStyle:c,strokeStyle:c});return sn;});
+  const v=new Voice({num_beats:notes.length>1?notes.length:4,beat_value:4}).setStrict(false);v.addTickables(sns);
+  new Formatter().joinVoices([v]).format([v],W-(notes.length>1?90:70));v.draw(ctx,stave);
+  const svg=el.querySelector('svg');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.style.width=W+'px';svg.style.maxWidth='100%';svg.style.height='auto';
+}
 function roteNext(){
   if(!rote.on)return;
+  const K=rote.kind,all=positions(rote.viol),prev=rote.target;let pool=rotePool();
   rote.wait=false;st.hl={};st.hlBlank=null;
-  const ps=positions(rote.viol),prev=rote.target;let p;
-  do{p=ps[Math.floor(Math.random()*ps.length)];}while(prev&&(rote.kind==='find'?(rote.oct?p.m===prev.m:pc(p.m)===pc(prev.m)):p.k===prev.k));   // never the same twice running
-  if(rote.kind==='find'){
+  const staff=K==='sfind'||K==='sname'||K==='line';$('roteStaff').style.display=staff?'':'none';$('roteAsk').style.display=staff?'none':'';
+  if(K==='same'){const two=q=>all.some(o=>o.m===q.m&&o.k!==q.k);pool=pool.filter(two);if(!pool.length)pool=all.filter(two);}   // (notes with another place)
+  if(K==='line'){
+    // six notes that move like a tune, up and down in small steps through the notes of the round
+    const ms=[...new Set(pool.map(q=>q.m))].sort((x,y)=>x-y),line=[];let i=Math.floor(Math.random()*ms.length);
+    for(let n=0;n<6;n++){line.push(roteSpell(ms[i]));if(ms.length<2)continue;let j;do{j=i+Math.round((Math.random()*2-1)*3);}while(j===i||j<0||j>=ms.length);i=j;}
+    rote.target={line,cur:0,marks:[]};roteStaffDraw(line,0,[]);
+    $('roteHow').textContent='Play the notes on the neck, one after another.';msg('Play the line on the neck');
+    drawNecks();return;
+  }
+  let p,n=0;   // never the same twice running
+  do{p=pool[Math.floor(Math.random()*pool.length)];}while(n++<60&&prev&&prev.m!=null&&(K==='find'?(rote.oct?p.m===prev.m:pc(p.m)===pc(prev.m)):K==='name'||K==='same'?p.k===prev.k:p.m===prev.m));
+  if(K==='find'){
     rote.target={m:p.m,name:roteName(p.m,rote.oct)};
-    $('roteAsk').textContent=rote.target.name;$('roteHow').textContent='Tap it on the neck'+(rote.oct?'.':' (any octave).');
-    msg('Find '+rote.target.name+' on the neck');   // (also under the neck, in case the menu is folded up)
-  }else{
+    $('roteAsk').textContent=rote.target.name;$('roteHow').textContent='Tap it on the neck'+(rote.oct?'.':' (any octave).');msg('Find '+rote.target.name+' on the neck');
+  }else if(K==='name'){
     rote.target=p;st.hl={[p.k]:'#d9a441'};st.hlBlank=p.k;
-    $('roteAsk').textContent='?';$('roteHow').textContent='Which note is the gold dot? Press its name.';
-    msg('Which note is the gold dot?');
+    $('roteAsk').textContent='?';$('roteHow').textContent='Which note is the gold dot? Press its name.';msg('Which note is the gold dot?');
+  }else if(K==='same'){
+    rote.target=p;st.hl={[p.k]:'#d9a441'};
+    $('roteAsk').textContent=spell(p.m).name;$('roteHow').textContent='Tap the same note in another place.';msg('Find '+spell(p.m).name+' in another place');
+  }else{
+    rote.target=Object.assign({},p,{sp:roteSpell(p.m)});roteStaffDraw([rote.target.sp],-1,[]);
+    $('roteHow').textContent=K==='sfind'?'Tap it on the neck, in the right octave.':'Press its name.';msg(K==='sfind'?'Find the note on the staff on the neck':'Name the note on the staff');
   }
   drawNecks();
 }
 function roteTap(v,s,f){
-  if(rote.kind!=='find'||rote.wait||!rote.target)return;
-  const m=VIOLS[violAt(v)].open[s]+f;
-  roteMark(rote.oct?m===rote.target.m:pc(m)===pc(rote.target.m),m,hk(v,s,f));
+  const K=rote.kind,t=rote.target;if(rote.wait||!t||!['find','sfind','same','line'].includes(K))return;
+  const m=VIOLS[violAt(v)].open[s]+f,key=hk(v,s,f);
+  if(K==='line'){roteLineTap(m,s,key);return;}
+  roteMark(K==='find'?(rote.oct?m===t.m:pc(m)===pc(t.m))&&strOk(s):K==='sfind'?m===t.m&&strOk(s):m===t.m&&key!==t.k,m,key);
 }
 function roteAnswer(p){
-  if(!rote.on||rote.kind!=='name'||rote.wait||!rote.target)return;
-  roteMark(pc(rote.target.m)===p,rote.target.m,rote.target.k,p);
+  const K=rote.kind,t=rote.target;if(!rote.on||rote.wait||!t||(K!=='name'&&K!=='sname'))return;
+  roteMark(pc(t.m)===p,t.m,t.k,p);
+}
+// the right places for the note asked, in green
+function roteShow(t){
+  const K=rote.kind;
+  positions(rote.viol).filter(p=>K==='find'?(rote.oct?p.m===t.m:pc(p.m)===pc(t.m))&&strOk(p.s):K==='same'?p.m===t.m&&p.k!==t.k:p.m===t.m&&(K!=='sfind'||strOk(p.s))).forEach(p=>st.hl[p.k]='#6fbf73');
 }
 function roteMark(ok,m,key,pressed){
-  const t=rote.target;rote.wait=true;rote.total++;if(ok){rote.right++;rote.streak++;}else rote.streak=0;
+  const t=rote.target,K=rote.kind;rote.wait=true;rote.total++;if(ok){rote.right++;rote.streak++;}else rote.streak=0;
   st.hl={};st.hlBlank=null;
-  if(rote.kind==='find'){   // where it is: every place that counts, in green; a wrong tap in red
-    positions(rote.viol).filter(p=>rote.oct?p.m===t.m:pc(p.m)===pc(t.m)).forEach(p=>st.hl[p.k]='#6fbf73');
-    if(!ok)st.hl[key]='#e0605a';
-    $('roteHow').textContent=ok?'Right.':`Not quite: that was ${spell(m).name}. Green shows where ${t.name} is.`;
-  }else{
-    st.hl[t.k]=ok?'#6fbf73':'#e0605a';
-    $('roteHow').textContent=ok?`Right: ${spell(t.m).name}.`:`Not quite: it is ${spell(t.m).name}, not ${NOTE_BTNS[pressed][1]}.`;
-  }
+  if(K==='name')st.hl[t.k]=ok?'#6fbf73':'#e0605a';
+  else{roteShow(t);if(K==='same')st.hl[t.k]='#d9a441';if(!ok&&key!==t.k&&K!=='sname')st.hl[key]='#e0605a';}
+  if(K==='sfind'||K==='sname')roteStaffDraw([t.sp],-1,[ok]);
+  const nm=K==='find'?t.name:t.sp?t.sp.name:spell(t.m).name;
+  $('roteHow').textContent=ok?`Right: ${nm}.`:K==='name'||K==='sname'?`Not quite: it is ${nm}, not ${NOTE_BTNS[pressed][1]}.`:`Not quite: that was ${spell(m).name}. Green shows where ${nm} is.`;
   msg($('roteHow').textContent,ok?'ok':'bad');
-  play(m,soundOf(rote.viol));roteScore();drawNecks();
-  try{localStorage.setItem('tenor-viol-rote-now',JSON.stringify(roteNow()));}catch(e){}   // (in case the page is closed before Finish)
-  setTimeout(roteNext,ok?700:1700);
+  play(K==='name'||K==='sname'?t.m:m,soundOf(rote.viol));roteScore();drawNecks();roteSaveNow();
+  setTimeout(()=>{if(rote.target===t)roteNext();},ok?700:1700);
 }
+// a line: each note in turn; a wrong one shows where it was, then the line goes on
+function roteLineTap(m,s,key){
+  const L=rote.target,n=L.line[L.cur],ok=m===n.m&&strOk(s);
+  rote.total++;if(ok){rote.right++;rote.streak++;}else rote.streak=0;
+  L.marks[L.cur]=ok;L.cur++;rote.wait=true;
+  st.hl={};if(!ok)positions(rote.viol).filter(p=>p.m===n.m&&strOk(p.s)).forEach(p=>st.hl[p.k]='#6fbf73');st.hl[key]=ok?'#6fbf73':'#e0605a';
+  $('roteHow').textContent=ok?`Right: ${n.name}.`:`Not quite: that was ${spell(m).name}; it is ${n.name}, in green.`;
+  msg($('roteHow').textContent,ok?'ok':'bad');
+  play(m,soundOf(rote.viol));roteStaffDraw(L.line,L.cur,L.marks);roteScore();drawNecks();roteSaveNow();
+  const done=L.cur>=L.line.length;
+  setTimeout(()=>{if(!rote.on||rote.target!==L)return;if(done){roteNext();return;}rote.wait=false;st.hl={};drawNecks();},done?1000:ok?250:1200);
+}
+let roteTimer=0;
 function roteStart(){
   stopPlay();if(rec.on)stopRec();
   if(st.mode!=='explore'){$('mode').value='explore';setMode();}   // (the quizzes in Settings use the neck too)
-  Object.assign(rote,{on:true,kind:$('roteKind').value,viol:$('roteViol').value,oct:$('roteOct').value==='1',right:0,total:0,streak:0,t0:Date.now(),target:null});
+  Object.assign(rote,{on:true,kind:$('roteKind').value,viol:$('roteViol').value,oct:$('roteOct').value==='1',str:+$('roteStr').value,limit:+$('roteLen').value,
+    right:0,total:0,streak:0,t0:Date.now(),target:null});
+  rote.end=rote.t0+rote.limit*1000;
   st.hideLabels=true;
-  $('roteGo').style.display='none';$('roteEnd').style.display='';$('roteBoard').style.display='';$('roteRec').style.display='none';
-  $('roteNames').style.display=rote.kind==='name'?'':'none';$('roteMsg').textContent='';
-  ['roteKind','roteViol','roteOct'].forEach(id=>$(id).disabled=true);
-  roteScore();roteNext();fitFold();
+  $('roteGo').style.display='none';$('roteBar').style.display='';
+  $('roteNames').style.display=rote.kind==='name'||rote.kind==='sname'?'':'none';$('roteMsg').textContent='A drill is running: Finish is under the neck.';
+  ['roteKind','roteViol','roteOct','roteStr','roteLen'].forEach(id=>$(id).disabled=true);
+  openFold('pRote',false);   // (the drill runs under the neck, so the menu folds up to make room)
+  clearInterval(roteTimer);if(rote.limit)roteTimer=setInterval(()=>{if(!rote.on)return clearInterval(roteTimer);if(Date.now()>=rote.end)roteFinish();else roteScore();},250);
+  roteScore();roteNext();
 }
 function roteFinish(){
   if(!rote.on)return;
+  clearInterval(roteTimer);
   const r=roteNow();if(r.total)roteKeep(r);try{localStorage.removeItem('tenor-viol-rote-now');}catch(e){}
   rote.on=false;rote.target=null;st.hl={};st.hlBlank=null;st.hideLabels=false;
-  $('roteGo').style.display='';$('roteEnd').style.display='none';$('roteBoard').style.display='none';$('roteRec').style.display='';
-  ['roteKind','roteViol','roteOct'].forEach(id=>$(id).disabled=false);
-  $('roteMsg').textContent=r.total?`You got ${r.right} out of ${r.total} (${Math.round(100*r.right/r.total)}%). It is in the record below.`:'Nothing was answered, so nothing was kept.';
-  drawNecks();roteTable();fitFold();
+  $('roteGo').style.display='';$('roteBar').style.display='none';
+  ['roteKind','roteViol','roteOct','roteStr','roteLen'].forEach(id=>$(id).disabled=false);
+  $('roteMsg').textContent=r.total?`${rote.limit?'Time is up. ':''}You got ${r.right} out of ${r.total} (${Math.round(100*r.right/r.total)}%), ${(r.secs/r.total).toFixed(1)} seconds each. It is in the record below.`:'Nothing was answered, so nothing was kept.';
+  drawNecks();roteTable();openFold('pRote',true);   // (the mark and the record)
 }
+const roteWhat=r=>(ROTE_KINDS[r.kind]||r.kind)+(r.kind==='find'&&r.oct?', with octave':'')+(r.str>=0?`, string ${r.str+1}`:'')+(r.limit?`, ${r.limit/60} min`:'');
 function roteTable(){
   const l=roteLog(),T=$('roteLog');
   if(!l.length){T.innerHTML='<p class="score">No rounds yet.</p>';$('roteClear').style.display='none';return;}
   const two=n=>String(n).padStart(2,'0'),dur=s=>s>=60?`${Math.floor(s/60)} min ${two(s%60)} s`:`${s} s`;
-  T.innerHTML='<table><tr><th>Date</th><th>Time</th><th>Drill</th><th>Viol</th><th>Mark</th><th>Took</th></tr>'+l.slice(0,300).map(r=>{const d=new Date(r.at);
-    return `<tr><td>${d.toLocaleDateString()}</td><td>${two(d.getHours())}:${two(d.getMinutes())}</td><td>${r.kind==='find'?'Find the note'+(r.oct?', with octave':''):'Name the note'}</td>`+
-      `<td>${VIOLS[r.viol]?VIOLS[r.viol].name:''}</td><td><b>${r.right}/${r.total}</b> (${Math.round(100*r.right/r.total)}%)</td><td>${dur(r.secs||0)}</td></tr>`;}).join('')+'</table>';
+  T.innerHTML='<table><tr><th>Date</th><th>Time</th><th>Drill</th><th>Viol</th><th>Mark</th><th>Took</th><th>Each</th></tr>'+l.slice(0,300).map(r=>{const d=new Date(r.at);
+    return `<tr><td>${d.toLocaleDateString()}</td><td>${two(d.getHours())}:${two(d.getMinutes())}</td><td>${roteWhat(r)}</td>`+
+      `<td>${VIOLS[r.viol]?VIOLS[r.viol].name:''}</td><td><b>${r.right}/${r.total}</b> (${Math.round(100*r.right/r.total)}%)</td><td>${dur(r.secs||0)}</td><td>${r.total?((r.secs||0)/r.total).toFixed(1)+' s':''}</td></tr>`;}).join('')+'</table>';
   $('roteClear').style.display='';
 }
+// the strings of the viol chosen, to keep a drill to one of them
+function roteStrings(){const S=$('roteStr'),keep=S.value;S.innerHTML='<option value="-1">all</option>'+VIOLS[$('roteViol').value].open.map((o,i)=>`<option value="${i}">${i+1} (${strName(o)})</option>`).join('');S.value=[...S.options].some(o=>o.value===keep)?keep:'-1';}
+function roteKindUI(){const k=$('roteKind').value;$('roteOctL').style.display=k==='find'?'':'none';$('roteInfo').textContent=ROTE_INFO[k];}
 $('roteGo').onclick=roteStart;
 $('roteEnd').onclick=roteFinish;
-$('roteKind').onchange=()=>{$('roteOctL').style.display=$('roteKind').value==='find'?'':'none';};
+$('roteKind').onchange=roteKindUI;
+$('roteViol').onchange=roteStrings;
 $('roteClear').onclick=()=>{const n=roteLog().length;if(n&&confirm(`Delete all ${n} rounds in the record? This cannot be undone.`)){try{localStorage.removeItem('tenor-viol-rote');}catch(e){}roteTable();}};
+roteStrings();roteKindUI();
 // a round that was going when the page was closed (or reloaded) goes into the record
 try{const left=JSON.parse(localStorage.getItem('tenor-viol-rote-now')||'null');if(left&&left.total)roteKeep(left);localStorage.removeItem('tenor-viol-rote-now');}catch(e){}
 roteTable();
