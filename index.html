@@ -143,6 +143,7 @@ span.pname{min-width:0;color:#6e4f28}
   <button id="fullBtn" style="display:none" title="Show every part's staff together, or only the part you are working on">All parts</button>
   <label id="neckPick" style="display:none" title="The part whose notes light up on the neck while the music plays">Neck shows <select id="neckSel"></select></label>
   <span style="flex:1"></span>
+  <button id="wipeBtn" title="Delete everything in the white score (asks first)">🗑 Clear score</button>
   <button class="fold" data-p="pPrac" title="Exercises: open strings, scales, arpeggios">Practise ▾</button>
   <button class="fold" data-p="pRote" title="Drills with a mark: find named notes on the neck, and name notes shown on it">Rote ▾</button>
   <button class="fold" data-p="pNotes" title="Rhythms, dots, rests and editing">Notes ▾</button>
@@ -341,7 +342,7 @@ span.pname{min-width:0;color:#6e4f28}
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector} = Vex.Flow;
 const $=id=>document.getElementById(id);
-const APP_VERSION='3.2';
+const APP_VERSION='3.3';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -1979,9 +1980,14 @@ $('nextBtn').onclick=()=>moveSel(1);
 $('upBtn').onclick=()=>setDur((sc.bi-1+BASES.length)%BASES.length);
 $('downBtn').onclick=()=>setDur((sc.bi+1)%BASES.length);
 $('endBtn').onclick=()=>{sc.sel=-1;sc.cur=sc.items.length;drawRecording();stat('Adding notes at the end.');};
-$('clearBtn').onclick=()=>{if(rec.on)stopRec();stopPlay();
+function clearScore(){if(rec.on)stopRec();stopPlay();
   if(sc.parts.length>1){sc.parts=[newPart('Tenor viol',null,'viola',0)];sc.pi=0;sc.neckPart=0;sc.sel=-1;sc.cur=0;buildParts();drawRecording();stat('Cleared all parts.');return;}
-  snap();sc.items=[];sc.sel=-1;sc.cur=0;drawRecording();buildParts();stat('Cleared (Undo brings it back).');};
+  snap();sc.items=[];sc.sel=-1;sc.cur=0;drawRecording();buildParts();stat('Cleared (Undo brings it back).');}
+$('clearBtn').onclick=clearScore;
+$('wipeBtn').onclick=()=>{   // always on screen: wipes any exercise, test or piece in the white score, after asking
+  if(sc.parts.every(p=>!p.items.length)){stat('The score is already empty.');return;}
+  const n=sc.parts.length;
+  if(confirm(n>1?`Delete the whole score, all ${n} parts? This cannot be undone.`:'Delete everything in the score? (Undo brings it back.)'))clearScore();};
 $('playBtn').onclick=playScore;
 function openFold(id,open){
   document.querySelectorAll('.foldp').forEach(x=>x.classList.toggle('open',x.id===id&&open));
