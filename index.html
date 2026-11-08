@@ -129,11 +129,14 @@ span.pname{min-width:0;color:#6e4f28}
   #recscore{padding:0}
   .playmark{display:none}
 }
-#advice{position:fixed;right:12px;bottom:12px;z-index:40;width:min(300px,calc(100vw - 24px));color:var(--inkd);background:var(--parch);border:1px solid var(--edge);border-radius:3px;box-shadow:inset 0 0 0 3px var(--parch),inset 0 0 0 4px #a8834a,0 6px 24px rgba(0,0,0,.8);padding:10px 14px 10px;display:block}
+#advice{position:fixed;right:12px;bottom:12px;z-index:40;width:300px;height:190px;min-width:200px;min-height:120px;max-width:96vw;max-height:96vh;resize:both;overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;gap:4px;color:var(--inkd);background:var(--parch);border:1px solid var(--edge);border-radius:3px;box-shadow:inset 0 0 0 3px var(--parch),inset 0 0 0 4px #a8834a,0 6px 24px rgba(0,0,0,.8);padding:6px 12px 8px}
 #advice.hide{display:none}
-#advice h4{margin:0 0 4px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;opacity:.7}
-#advice #adviceTxt{font-size:19px;line-height:1.3;min-height:2.6em}
+#advice h4{margin:0;padding:2px 22px 2px 0;font-size:13px;letter-spacing:.06em;text-transform:uppercase;opacity:.7;cursor:move;user-select:none;touch-action:none}
+#advice #adviceTxt{flex:1;overflow:auto;font-size:19px;line-height:1.3}
 #advice #adviceX{position:absolute;top:2px;right:6px;border:0;background:none;font-size:18px;cursor:pointer;color:inherit}
+#advice .arow{display:flex;gap:4px;flex:none}
+#advice .arow input{flex:1;min-width:0}
+#advice #adviceBank{flex:1;min-height:60px;width:100%;box-sizing:border-box;resize:none;font:14px/1.3 var(--ui)}
 </style>
 </head>
 <body>
@@ -2354,14 +2357,33 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)leavePage(I
 addEventListener('pagehide',()=>leavePage(true));
 addEventListener('pageshow',e=>{if(!e.persisted)return;audioWoken=false;drawNecks();keepScroll(drawRecording);fitFold();followUI();});
 </script>
-<div id="advice" role="status" aria-live="polite"><button id="adviceX" title="Hide (it comes back when you press Play)">×</button><h4>Practice advice</h4><div id="adviceTxt">Practice advice appears here.</div></div>
+<div id="advice" role="status" aria-live="polite"><button id="adviceX" title="Hide (it comes back when you press Play)">×</button><h4 id="adviceHead" title="Drag to move">Practice advice</h4><div id="adviceTxt"></div><textarea id="adviceBank" style="display:none" aria-label="Advice bank, one tip per line"></textarea><div class="arow"><input id="adviceNew" placeholder="Add a tip…" maxlength="200"><button id="adviceAdd">Add</button><button id="adviceEdit">Edit bank</button></div></div>
 <script>
-const ADVICE=['Posture should be straight.','Your elbows should be hanging.','Shoulders down.','Left fingers should stay down when another note is added on the same string.','Left hand thumb stays behind second finger.','Left hand thumb stays below the middle line of the back of the neck.','Breathe.','Check your bow is straight.','Check there is no claw.','Use tip of bow.','Relax bow hand.','Feet flat.','Make sure bow is above knees.','Middle finger through the string.'];
-let adviceI=0,adviceT=null;
-function adviceShow(){$('adviceTxt').textContent=ADVICE[adviceI%ADVICE.length];}
-function adviceStart(){$('advice').classList.remove('hide');if(adviceT)return;adviceShow();adviceT=setInterval(()=>{adviceI++;adviceShow();},5000);}
+const ADVICE_DEFAULT=['Posture should be straight.','Your elbows should be hanging.','Shoulders down.','Left fingers should stay down when another note is added on the same string.','Left hand thumb stays behind second finger.','Left hand thumb stays below the middle line of the back of the neck.','Breathe.','Check your bow is straight.','Check there is no claw.','Use tip of bow.','Relax bow hand.','Feet flat.','Make sure bow is above knees.','Middle finger through the string.'];
+let ADVICE=ADVICE_DEFAULT.slice(),adviceI=0,adviceT=null;
+const adviceBox=$('advice');
+try{const b=JSON.parse(localStorage.getItem('adviceBank'));if(Array.isArray(b)&&b.length)ADVICE=b.map(x=>String(x).slice(0,200));}catch(e){}
+function adviceSave(){try{localStorage.setItem('adviceBank',JSON.stringify(ADVICE));}catch(e){}}
+function adviceShow(){$('adviceTxt').textContent=ADVICE[adviceI%ADVICE.length]||'';}
+function adviceStart(){adviceBox.classList.remove('hide');if(adviceT)return;adviceShow();adviceT=setInterval(()=>{if($('adviceBank').style.display==='none'){adviceI++;adviceShow();}},5000);}
 function adviceStop(){}   // the advice keeps cycling whether or not the music is playing
-$('adviceX').onclick=()=>$('advice').classList.add('hide');
+$('adviceX').onclick=()=>adviceBox.classList.add('hide');
+$('adviceAdd').onclick=()=>{const v=$('adviceNew').value.trim();if(!v)return;ADVICE.push(v.slice(0,200));adviceSave();$('adviceNew').value='';adviceI=ADVICE.length-1;adviceShow();};
+$('adviceNew').onkeydown=e=>{if(e.key==='Enter')$('adviceAdd').onclick();e.stopPropagation();};
+$('adviceEdit').onclick=()=>{const T=$('adviceBank'),editing=T.style.display!=='none';
+  if(editing){const l=T.value.split('\n').map(x=>x.trim().slice(0,200)).filter(Boolean);ADVICE=l.length?l:ADVICE_DEFAULT.slice();adviceSave();T.style.display='none';$('adviceTxt').style.display='';$('adviceEdit').textContent='Edit bank';adviceI=0;adviceShow();}
+  else{T.value=ADVICE.join('\n');T.style.display='';$('adviceTxt').style.display='none';$('adviceEdit').textContent='Save bank';T.focus();}};
+$('adviceBank').onkeydown=e=>e.stopPropagation();
+// drag by the title; remember position and size
+(function(){const H=$('adviceHead');let d=null;
+  const keep=()=>{try{const r=adviceBox.getBoundingClientRect();localStorage.setItem('advicePos',JSON.stringify({l:r.left,t:r.top,w:r.width,h:r.height}));}catch(e){}};
+  const place=(l,t)=>{adviceBox.style.right='auto';adviceBox.style.bottom='auto';adviceBox.style.left=Math.max(0,Math.min(innerWidth-60,l))+'px';adviceBox.style.top=Math.max(0,Math.min(innerHeight-40,t))+'px';};
+  try{const p=JSON.parse(localStorage.getItem('advicePos'));if(p){adviceBox.style.width=p.w+'px';adviceBox.style.height=p.h+'px';place(p.l,p.t);}}catch(e){}
+  H.addEventListener('pointerdown',e=>{const r=adviceBox.getBoundingClientRect();d={x:e.clientX-r.left,y:e.clientY-r.top};H.setPointerCapture(e.pointerId);});
+  H.addEventListener('pointermove',e=>{if(d)place(e.clientX-d.x,e.clientY-d.y);});
+  H.addEventListener('pointerup',()=>{if(d){d=null;keep();}});
+  if(window.ResizeObserver)new ResizeObserver(()=>{if(adviceBox.style.left)keep();}).observe(adviceBox);
+})();
 adviceStart();
 </script>
 </body>
