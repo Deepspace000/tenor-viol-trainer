@@ -1050,7 +1050,7 @@ function setDots(n){sc.dots=n;if(sc.sel>=0){snap();sc.items[sc.sel].d=durT();}bu
 // a note of the part you work on, on its own neck or its viol's neck (not when Neck shows is set to another part)
 function lightNeck(m){
   st.hl={};
-  const v=partNecks()?'p'+sc.pi:sc.parts.length>1&&sc.neckPart!==sc.pi?null:neckFor(sc.pi);
+  const v=partNecks()?'p'+sc.pi:neckFor(sc.pi);   // the clicked note's own part, whichever part "Neck shows" is set to
   if(v)placesFor(v,m+neckUp(v)).forEach(p=>st.hl[p.k]=colOfNeck(v).neck);
   drawNecks();
 }
@@ -2357,16 +2357,19 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)leavePage(I
 addEventListener('pagehide',()=>leavePage(true));
 addEventListener('pageshow',e=>{if(!e.persisted)return;audioWoken=false;drawNecks();keepScroll(drawRecording);fitFold();followUI();});
 </script>
-<div id="advice" role="status" aria-live="polite"><button id="adviceX" title="Hide (it comes back when you press Play)">×</button><h4 id="adviceHead" title="Drag to move">Practice advice</h4><div id="adviceTxt"></div><textarea id="adviceBank" style="display:none" aria-label="Advice bank, one tip per line"></textarea><div class="arow"><input id="adviceNew" placeholder="Add a tip…" maxlength="200"><button id="adviceAdd">Add</button><button id="adviceEdit">Edit bank</button></div></div>
+<div id="advice" role="status" aria-live="polite"><button id="adviceX" title="Hide (it comes back when you press Play)">×</button><h4 id="adviceHead" title="Drag to move">Practice advice</h4><div id="adviceTxt"></div><textarea id="adviceBank" style="display:none" aria-label="Advice bank, one tip per line"></textarea><div class="arow"><input id="adviceNew" placeholder="Add a tip…" maxlength="200"><button id="adviceAdd">Add</button><select id="adviceSec" title="Seconds between tips"><option value="2">2s</option><option value="3">3s</option><option value="5">5s</option><option value="8">8s</option><option value="10">10s</option><option value="15">15s</option><option value="20">20s</option><option value="30">30s</option><option value="60">60s</option></select><button id="adviceEdit">Edit bank</button></div></div>
 <script>
 const ADVICE_DEFAULT=['Posture should be straight.','Your elbows should be hanging.','Shoulders down.','Left fingers should stay down when another note is added on the same string.','Left hand thumb stays behind second finger.','Left hand thumb stays below the middle line of the back of the neck.','Breathe.','Check your bow is straight.','Check there is no claw.','Use tip of bow.','Relax bow hand.','Feet flat.','Make sure bow is above knees.','Middle finger through the string.'];
-let ADVICE=ADVICE_DEFAULT.slice(),adviceI=0,adviceT=null;
+let ADVICE=ADVICE_DEFAULT.slice(),adviceI=0,adviceT=null,adviceSecs=5;
+try{const n=+localStorage.getItem('adviceSecs');if(n>=1&&n<=600)adviceSecs=n;}catch(e){}
 const adviceBox=$('advice');
 try{const b=JSON.parse(localStorage.getItem('adviceBank'));if(Array.isArray(b)&&b.length)ADVICE=b.map(x=>String(x).slice(0,200));}catch(e){}
 function adviceSave(){try{localStorage.setItem('adviceBank',JSON.stringify(ADVICE));}catch(e){}}
 function adviceShow(){$('adviceTxt').textContent=ADVICE[adviceI%ADVICE.length]||'';}
-function adviceStart(){adviceBox.classList.remove('hide');if(adviceT)return;adviceShow();adviceT=setInterval(()=>{if($('adviceBank').style.display==='none'){adviceI++;adviceShow();}},5000);}
+function adviceStart(){adviceBox.classList.remove('hide');if(adviceT)return;adviceShow();adviceT=setInterval(()=>{if($('adviceBank').style.display==='none'){adviceI++;adviceShow();}},adviceSecs*1000);}
 function adviceStop(){}   // the advice keeps cycling whether or not the music is playing
+{const S=$('adviceSec');if(![...S.options].some(o=>+o.value===adviceSecs)){const o=document.createElement('option');o.value=adviceSecs;o.textContent=adviceSecs+'s';S.append(o);}S.value=adviceSecs;
+S.onchange=()=>{adviceSecs=+S.value;try{localStorage.setItem('adviceSecs',adviceSecs);}catch(e){}clearInterval(adviceT);adviceT=null;adviceStart();};}
 $('adviceX').onclick=()=>adviceBox.classList.add('hide');
 $('adviceAdd').onclick=()=>{const v=$('adviceNew').value.trim();if(!v)return;ADVICE.push(v.slice(0,200));adviceSave();$('adviceNew').value='';adviceI=ADVICE.length-1;adviceShow();};
 $('adviceNew').onkeydown=e=>{if(e.key==='Enter')$('adviceAdd').onclick();e.stopPropagation();};
