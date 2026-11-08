@@ -1051,7 +1051,7 @@ function setDots(n){sc.dots=n;if(sc.sel>=0){snap();sc.items[sc.sel].d=durT();}bu
 function lightNeck(m){
   st.hl={};
   const v=partNecks()?'p'+sc.pi:neckFor(sc.pi);   // the clicked note's own part, whichever part "Neck shows" is set to
-  if(v)placesFor(v,m+neckUp(v)).forEach(p=>st.hl[p.k]=colOfNeck(v).neck);
+  if(v)placesFor(v,m+neckUp(v)).forEach(p=>st.hl[p.k]='#ff2a2a');
   drawNecks();
 }
 function selectItem(i){
