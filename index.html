@@ -2354,14 +2354,15 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)leavePage(I
 addEventListener('pagehide',()=>leavePage(true));
 addEventListener('pageshow',e=>{if(!e.persisted)return;audioWoken=false;drawNecks();keepScroll(drawRecording);fitFold();followUI();});
 </script>
-<div id="advice" role="status" aria-live="polite"><button id="adviceX" title="Hide (it comes back when you press Play)">×</button><h4>Practice advice</h4><div id="adviceTxt">Press Play and advice will appear here.</div></div>
+<div id="advice" role="status" aria-live="polite"><button id="adviceX" title="Hide (it comes back when you press Play)">×</button><h4>Practice advice</h4><div id="adviceTxt">Practice advice appears here.</div></div>
 <script>
 const ADVICE=['Posture should be straight.','Your elbows should be hanging.','Shoulders down.','Left fingers should stay down when another note is added on the same string.','Left hand thumb stays behind second finger.','Left hand thumb stays below the middle line of the back of the neck.','Breathe.','Check your bow is straight.','Check there is no claw.','Use tip of bow.','Relax bow hand.','Feet flat.','Make sure bow is above knees.','Middle finger through the string.'];
 let adviceI=0,adviceT=null;
 function adviceShow(){$('adviceTxt').textContent=ADVICE[adviceI%ADVICE.length];}
-function adviceStart(){clearInterval(adviceT);adviceI=0;$('advice').classList.remove('hide');adviceShow();adviceT=setInterval(()=>{adviceI++;adviceShow();},5000);}
-function adviceStop(){clearInterval(adviceT);adviceT=null;$('adviceTxt').textContent='Press Play and advice will appear here.';}
+function adviceStart(){$('advice').classList.remove('hide');if(adviceT)return;adviceShow();adviceT=setInterval(()=>{adviceI++;adviceShow();},5000);}
+function adviceStop(){}   // the advice keeps cycling whether or not the music is playing
 $('adviceX').onclick=()=>$('advice').classList.add('hide');
+adviceStart();
 </script>
 </body>
 </html>
