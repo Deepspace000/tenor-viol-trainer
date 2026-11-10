@@ -910,7 +910,7 @@ function decomp(t){const out=[];for(const r of REP){while(t>=r.t){out.push(r.t);
 // the pieces a note is drawn in (a triplet's note is one piece; nd is the length it is written as)
 const pieceDurs=(it,take)=>it.tu?[take]:decomp(Math.round(take));
 function pieceOf(it,d,idx){const q={m:it.m,d,idx};if(it.ch)q.ch=it.ch;if(it.tu){q.tu=it.tu;q.nd=Math.round(d*1.5);}if(it.hid)q.hid=true;if(it.up!=null)q.up=it.up;
-  if(it.sp)q.sp=it.sp;if(it.art)q.art=it.art;if(it.dyn)q.dyn=it.dyn;if(it.gr)q.gr=it.gr;if(it.ss)q.ss=it.ss;if(it.se)q.se=it.se;return q;}
+  if(it.sp)q.sp=it.sp;if(it.ly)q.ly=it.ly;if(it.art)q.art=it.art;if(it.dyn)q.dyn=it.dyn;if(it.gr)q.gr=it.gr;if(it.ss)q.ss=it.ss;if(it.se)q.se=it.se;return q;}
 // the second voice of a part, in the bars printed in the score (one group of pieces for each printed bar)
 function v2Bars(p){const out=[];let g=null;
   (p.v2||[]).forEach(it=>{if(it.bar!=null||!g){g=[];out.push(g);}const ps=pieceDurs(it,it.d).map(d=>pieceOf(it,d,-1));
@@ -1212,7 +1212,7 @@ function labelNotes(svg,notes,keys,stave){
       t.setAttribute('x',x.toFixed(1));t.setAttribute('y',(y0+ri*15).toFixed(1));t.setAttribute('text-anchor','middle');
       t.setAttribute('font-family',SCORE_FONT);t.setAttribute('font-size',r==='n'?'13':'12.5');
       t.setAttribute('fill',r==='n'?'#2a2118':'#8a3b12');if(r==='s')t.setAttribute('font-style','italic');
-      t.textContent=r==='n'?spell(k.m,k.key).pcname:solfa(k.m,k.key);
+      t.textContent=r==='n'?(k.nm||spell(k.m,k.key).pcname):solfa(k.m,k.key);
       svg.appendChild(t);
     });
   });
@@ -1220,6 +1220,8 @@ function labelNotes(svg,notes,keys,stave){
 // the notes of a chord for VexFlow, lowest first (ms: their pitches in the same order)
 function chordKeys(p,T,key,shift){const ms=[p.m].concat(p.ch||[]).sort((a,b)=>a-b);
   return {ms,keys:ms.map(m=>{const sp=spellAs(p,m,T,key);return sp.letter.toLowerCase()+(sp.off>0?'#':sp.off<0?'b':'')+'/'+(sp.oct+shift);})};}
+// the name of a note as it was printed (E flat, not D sharp), when the score that was read says
+const printedName=(p,T)=>{if(T||!p.sp||p.sp[p.m]==null)return null;const s=spellAs(p,p.m,0,0);return s.letter+(s.off>0?'♯':s.off<0?'♭':'');};
 // A note's spelling: as it was printed in the score that was read (sp), else as the key suggests.
 function spellAs(p,m,T,key){
   const o=!T&&p.sp?p.sp[m]:null;
@@ -1241,9 +1243,16 @@ const ARTV={st:'a.',ac:'a>',te:'a-',fe:'a@a'};
 function addArts(ps,notes){ps.forEach((p,i)=>{const sn=notes[i];if(!p.art||!sn||sn.ghost||p.m==null||p.tiePrev)return;
   p.art.forEach(a=>{if(!ARTV[a])return;try{sn.addModifier(new Articulation(ARTV[a]).setPosition(a==='fe'?3:(sn.getStemDirection()>0?4:3)),0);}catch(e){}});});}
 // dynamics under the staff (over it for a voice part, whose words go underneath)
-function drawMarks(ctx,svg,stave,pieces,notes,above){pieces.forEach((p,i)=>{const sn=notes[i];if(!p.dyn||!sn||sn.ghost||p.tiePrev)return;
-  let x;try{x=sn.getAbsoluteX();}catch(e){return;}
+const hasWords=()=>sc.parts.some(p=>p.items.some(i=>i.ly));
+function drawMarks(ctx,svg,stave,pieces,notes,above){
   const rows=(showNames()?1:0)+(showSolfa()?1:0);
+  // the words of a song, under their notes (below the note names when those are shown)
+  pieces.forEach((p,i)=>{const sn=notes[i];if(!p.ly||!sn||sn.ghost||p.tiePrev)return;
+    let x;try{x=(sn.getNoteHeadBeginX()+sn.getNoteHeadEndX())/2;}catch(e){return;}
+    p.ly.split('\n').forEach((line,li)=>{const t=document.createElementNS(SVGNS,'text');t.setAttribute('x',x.toFixed(1));t.setAttribute('y',(stave.getYForLine(4)+(rows?52+rows*15:46)+li*16).toFixed(1));
+      t.setAttribute('text-anchor','middle');t.setAttribute('font-family',SCORE_FONT);t.setAttribute('font-size','14');t.setAttribute('fill','#000');t.textContent=line;svg.appendChild(t);});});
+  pieces.forEach((p,i)=>{const sn=notes[i];if(!p.dyn||!sn||sn.ghost||p.tiePrev)return;
+  let x;try{x=sn.getAbsoluteX();}catch(e){return;}
   try{omrDrawDyn(Vex.Flow,ctx,null,p.dyn,x-4,above?stave.getYForLine(0)-18:stave.getYForLine(4)+(rows?26:34),rows?24:30);}catch(e){}});}
 const dynAbove=pt=>!pt.kb&&sc.parts.some(q=>q.kb);
 // triplets: three notes in a row that are marked as one
@@ -1295,7 +1304,7 @@ function drawScore(el){
   const barClef=b=>b.clef&&b.clef!==part().mainClef&&{alto:1,tenor:1,treble:1,bass:1}[b.clef]?b.clef:scoreClef();   // (only a clef this score can draw)
   const REST_KEY={alto:'c/4',tenor:'a/3',treble:'b/4',treble8:'b/4',bass:'d/3'};
   const labelled=showNames()||showSolfa();
-  const H0=200+(showNames()?16:0)+(showSolfa()?16:0);
+  const H0=200+(showNames()?16:0)+(showSolfa()?16:0)+(hasWords()?20:0);
   const allNotes=[],all2=[];
   const sysCtx=[];
   const v2g=part().v2&&!rec.on?v2Bars(part()):null;let v2k=0;   // the second voice, bar by bar
@@ -1334,7 +1343,7 @@ function drawScore(el){
         const col=p.idx===sc.sel?'#1f5fbf':(p.idx>=nReal?'#c0392b':null);
         if(col&&!sn.ghost)sn.setStyle({fillStyle:col,strokeStyle:col});
         allNotes.push({sn,p,si});
-        labels.push(p.m!=null&&!p.tiePrev?{m:p.m+T,key:KK(bar.key)}:null);   // a tied-on part of a note is not named again
+        labels.push(p.m!=null&&!p.tiePrev?{m:p.m+T,key:KK(bar.key),nm:printedName(p,T)}:null);   // a tied-on part of a note is not named again
         return sn;});
       const tups=tupletsOf(bar,notes),nb=Math.max(1,bar.reduce((a,p)=>a+p.d,0)/TPQ);
       let beams=[];try{beams=Beam.generateBeams(notes.filter(n=>!n.ghost),beamOpt(bar.ts,two?1:0));}catch(e){}
@@ -1422,7 +1431,7 @@ function drawFullScore(el){
   const drawable={alto:1,tenor:1,treble:1,bass:1};
   const clefOf=(pt,c)=>c&&c!==pt.mainClef&&drawable[c]?c:(pt.clef||st.clef);
   const REST_KEY={alto:'c/4',tenor:'a/3',treble:'b/4',treble8:'b/4',bass:'d/3'};
-  const rowsL=(showNames()?16:0)+(showSolfa()?16:0),gapY=rowsL?106+rowsL:100,H0=50+(NP-1)*gapY+150+rowsL;
+  const rowsL=(showNames()?16:0)+(showSolfa()?16:0)+(hasWords()?20:0),gapY=rowsL?106+rowsL:100,H0=50+(NP-1)*gapY+150+rowsL;
   const all=sc.parts.map(()=>[]),allB=sc.parts.map(()=>[]),sysCtx=[];
   sysList.forEach((sys,si)=>{
     const hd=pieceHead(sys.units[0].b),H=H0+hd;   // (room for a piece's title)
@@ -1471,7 +1480,7 @@ function drawFullScore(el){
             const sn=mkNote(p,Object.assign({stem},no));
             if(sel&&pi===sc.pi&&p.idx===sc.sel&&!sn.ghost)sn.setStyle({fillStyle:'#1f5fbf',strokeStyle:'#1f5fbf'});
             ticks.push(sn);pcs.push(p);tk.push(sn);
-            if(!sn.ghost){real.push(sn);labels.push(sel&&p.m!=null&&!p.tiePrev?{m:p.m+TP[pi],key:KP[pi](bar.key)}:null);store.push({sn,p,si});}
+            if(!sn.ghost){real.push(sn);labels.push(sel&&p.m!=null&&!p.tiePrev?{m:p.m+TP[pi],key:KP[pi](bar.key),nm:printedName(p,TP[pi])}:null);store.push({sn,p,si});}
             pos=Math.max(pos,p.at)+p.d;
           });
           const tups=tupletsOf(pcs,tk);
@@ -2020,10 +2029,12 @@ function addScannedPoly(all,pages,override){
       const ts=(g.find(s=>s.pieceTs)||{}).pieceTs;if(ts)g.forEach(s=>{if(!s.pieceTs)s.pieceTs=ts;});});}
   const res=omrPolyItems(pages,plan,st.clef,override,barT),nv=plan.filter(p=>!p.kb).length,hasKb=plan.some(p=>p.kb);
   const made=plan.map((pl,k)=>{const cl=pl.clef;let name,sound;
-    if(pl.kb){name=pl.kb==='U'?'Piano right hand':'Piano left hand';sound='piano';}
+    const pair=plan.filter(q=>q.kb),twoTreble=pair.length===2&&pair.every(q=>q.clef==='treble');
+    if(pl.kb&&twoTreble){name=pl.kb==='U'?'Voice 1':'Voice 2';sound='violin';}
+    else if(pl.kb){name=pl.kb==='U'?'Piano right hand':'Piano left hand';sound='piano';}
     else if(hasKb){name=nv>1?'Voice '+(k+1):'Voice';sound=(PART_OF[cl]||[0,'viola'])[1];}
     else [name,sound]=PART_OF[cl]||['Part '+(k+1),'viola'];
-    return {name,clef:cl==='alto'||cl==='tenor'?null:cl,mainClef:cl,sound,pan:pl.kb||nv<2?0:+(-0.5+k/(nv-1)).toFixed(2),items:res.parts[k].items,v2:res.parts[k].v2,kb:pl.kb||null};});
+    return {name,clef:cl==='alto'||cl==='tenor'?null:cl,mainClef:cl,sound,pan:pl.kb||nv<2?0:+(-0.5+k/(nv-1)).toFixed(2),items:res.parts[k].items,v2:res.parts[k].v2,kb:pl.kb&&!twoTreble?pl.kb:null,br:pl.kb&&twoTreble?pl.kb:null};});
   made.forEach(m=>{const same=made.filter(x=>x.name===m.name);if(same.length>1)m.name+=' '+(same.indexOf(m)+1);});
   const fresh=sc.parts.every(p=>!p.items.length)||confirm(`Replace the notes you have with the ${made.length} parts read from the score?\n\nOK replaces them. Cancel adds each part to the end of the part in the same place.`);
   if(fresh)sc.parts=made.map(m=>Object.assign(newPart(m.name,m.clef,m.sound,m.pan),{mainClef:m.mainClef,items:m.items,v2:m.v2,pb:true,kb:m.kb}));
@@ -2254,12 +2265,14 @@ function musicXml(){
           const tail=`<duration>${dur}</duration>`,post=`<voice>${vn}</voice><type>${type}</type>${'<dot/>'.repeat(rp.d)}${tm}`+(two?`<stem>${vn===1?'up':'down'}</stem>`:'');
           if(q.m==null){out+=`<note><rest/>${tail}${post}</note>\n`;tied[vn-1].clear();return;}
           const ms=[q.m].concat(q.ch||[]).sort((a,b)=>a-b),starts=new Set(q.tieNext?ms:(q.tn||[]).filter(m=>ms.includes(m))),stops=tied[vn-1];
+          let ly='';
           ms.forEach((m,k)=>{const sp=spellAs(q,m,0,bar.key),tS=starts.has(m),tE=stops.has(m);
             let no=(tE?'<tied type="stop"/>':'')+(tS?'<tied type="start"/>':'');
+            if(k===0&&q.ly&&!q.tiePrev)ly=q.ly.split('\n').map((l,n)=>`<lyric number="${n+1}"><syllabic>${/-$/.test(l)?'begin':'single'}</syllabic><text>${X(l.replace(/-$/,''))}</text></lyric>`).join('');
             if(k===0&&q.ss&&!q.tiePrev)no+='<slur type="start"/>';
             if(k===0&&q.se&&!q.tieNext)no+='<slur type="stop"/>';
             if(k===0&&q.art&&!q.tiePrev){const a=q.art.filter(x=>ARTX[x]).map(x=>`<${ARTX[x]}/>`).join('');if(a)no+=`<articulations>${a}</articulations>`;if(q.art.includes('fe'))no+='<fermata/>';}
-            out+=`<note>${k?'<chord/>':''}<pitch><step>${sp.letter}</step>${sp.off?`<alter>${sp.off}</alter>`:''}<octave>${sp.oct}</octave></pitch>${tail}${tE?'<tie type="stop"/>':''}${tS?'<tie type="start"/>':''}${post}${no?`<notations>${no}</notations>`:''}</note>\n`;});
+            out+=`<note>${k?'<chord/>':''}<pitch><step>${sp.letter}</step>${sp.off?`<alter>${sp.off}</alter>`:''}<octave>${sp.oct}</octave></pitch>${tail}${tE?'<tie type="stop"/>':''}${tS?'<tie type="start"/>':''}${post}${no?`<notations>${no}</notations>`:''}${k===0?ly:''}</note>\n`;});
           tied[vn-1]=starts;});
         return len;};
       const len=voice(bar,1);

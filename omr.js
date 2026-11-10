@@ -354,7 +354,7 @@ function analyzeBitmap(imgData, opts){
         if (py < yb) { const q = p + W; if (!wall(q) && !visited2[q]) { visited2[q] = 1; stack[sp++] = q; } }
       }
       const w = maxx - minx + 1, h = maxy - miny + 1;
-      if (edge || area > lim || w > 1.1 * U || h > 1.05 * U || w < 0.25 * U || h < 0.3 * U) { if (opts.debug) (analyzeBitmap.d6 = analyzeBitmap.d6 || []).push([minx, miny, maxx - minx + 1, maxy - miny + 1, area, 'size']); continue; }
+      if (edge || area > lim || w > (opts.thickLedger ? 1.4 : 1.1) * U || h > 1.05 * U || w < 0.25 * U || h < 0.3 * U) { if (opts.debug) (analyzeBitmap.d6 = analyzeBitmap.d6 || []).push([minx, miny, maxx - minx + 1, maxy - miny + 1, area, 'size']); continue; }
       if (!(miny > 0 && lineNear[miny - 1]) && !(maxy < H - 1 && lineNear[maxy + 1])) { if (opts.debug) (analyzeBitmap.d6 = analyzeBitmap.d6 || []).push([minx, miny, maxx - minx + 1, maxy - miny + 1, area, 'noline']); continue; }
       // round on BOTH sides: the gap between a sharp and its note is round only on the note's side
       const lx = new Int32Array(h).fill(1e9), rx = new Int32Array(h).fill(-1);
@@ -714,7 +714,7 @@ function omrReadPage(imgData, again) {
     // nothing joins them, but the clefs come round in a repeating pattern (treble, alto, bass, treble, ...): group by it
     const cl = SV.map(s => s.clefType || '?');
     if (sys === SV.length - 1 && SV.length >= 4 && new Set(cl).size > 1) {
-      for (let k = 2; k <= 6; k++) if (SV.length % k === 0 && cl.every((c, i) => c === cl[i % k])) { SV.forEach((_, i) => sysOf[i] = Math.floor(i / k)); break; }
+      for (let k = 2; k <= 6; k++) if (SV.length % k === 0 && SV.length >= 2 * k && !cl.slice(0, k).every(c => c === cl[0]) && cl.every((c, i) => c === cl[i % k])) { SV.forEach((_, i) => sysOf[i] = Math.floor(i / k)); break; }
     }
   }
   const posOf = SV.map((_, i) => { let k = 0; for (let j = i - 1; j >= 0 && sysOf[j] === sysOf[i]; j--) k++; return k; });
@@ -900,7 +900,7 @@ function omrReadPage(imgData, again) {
             if (Math.abs(mx - cx) > 0.5 * p) continue;
             // (a ledger line lies between the note and the staff, on a line's place; a dash is shorter)
             const onLine = Math.abs((my - st.top) / p - Math.round((my - st.top) / p)) < 0.2 && (my < st.top || my > st.bot);
-            if (c.w >= 0.18 * p && c.w <= 0.6 * p && c.h >= 0.18 * p && c.h <= 0.6 * p && Math.abs(c.w - c.h) <= 0.18 * p && fill >= 0.6) { if (!e.art.includes('st')) e.art.push('st'); }
+            if (c.w >= 0.22 * p && c.w <= 0.6 * p && c.h >= 0.22 * p && c.h <= 0.6 * p && Math.abs(c.w - c.h) <= 0.18 * p && c.w <= 1.5 * c.h && fill >= 0.6 && Math.abs(my - (sg > 0 ? botY : topY)) <= 2.0 * p) { if (!e.art.includes('st')) e.art.push('st'); }
             else if (c.w >= 0.7 * p && c.w <= 1.5 * p && c.h <= 0.34 * p && fill >= 0.7 && !onLine) { if (!e.art.includes('te')) e.art.push('te'); }
             else if (c.w >= 0.9 * p && c.w <= 1.9 * p && c.h >= 0.45 * p && c.h <= 1.25 * p && fill <= 0.6) {
               // a wedge open to the left: its left end is as tall as the sign, its right end a point in the middle
@@ -1095,7 +1095,7 @@ function omrReadPage(imgData, again) {
     const bw = xb - xa + 1, bh = yb - ya + 1; if (bw < 10 || bh < 10) continue;
     const seen = new Uint8Array(bw * bh), stk = [], cap = Math.round(60 * p * 0.6 * p);
     const heads = []; grp.forEach(s => s.pe.forEach(e => { if (e.kind === 'note') e.notes.forEach(h => heads.push({ e, h, s })); }));
-    const nearHead = (x, y) => { let best = null, bd = 1e9; for (const q of heads) { const dx = Math.abs(q.h.x - x), dy = Math.abs(q.h.y - y); if (dx > 1.4 * p || dy > 3.4 * p) continue; const d = dx + 0.5 * dy; if (d < bd) { bd = d; best = q; } } return best; };
+    const nearHead = (x, y) => { let best = null, bd = 1e9; for (const q of heads) { const dx = Math.abs(q.h.x - x), dy = Math.abs(q.h.y - y); if (dx > 1.4 * p || dy > 5 * p) continue; const d = dx + 0.3 * dy; if (d < bd) { bd = d; best = q; } } return best; };
     for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
       if (seen[y * bw + x] || !clean[(y + ya) * W + x + xa]) continue;
       let minx = x, maxx = x, miny = y, maxy = y, area = 0; const pix = []; stk.length = 0; stk.push(y * bw + x); seen[y * bw + x] = 1;
@@ -1425,7 +1425,9 @@ function omrPolyPlan(pages) {
   const systems = [];
   pages.forEach(pg => { if (!pg) return; const by = {}; pg.staves.forEach(s => (by[s.sys] = by[s.sys] || []).push(s)); Object.keys(by).sort((a, b) => a - b).forEach(k => systems.push(by[k])); });
   let ref = [], hasKb = false;
-  systems.forEach(g => { const v = g.filter(s => !s.kb); if (g.some(s => s.kb)) hasKb = true; if (v.length > ref.length) ref = v.map(s => s.clefType); });
+  systems.forEach(g => { if (g.some(s => s.kb)) hasKb = true; });
+  // (the line-up of the staves above the piano comes from the systems that have the piano; a cut-off system does not count)
+  systems.forEach(g => { if (hasKb && !g.some(s => s.kb)) return; const v = g.filter(s => !s.kb); if (v.length > ref.length) ref = v.map(s => s.clefType); });
   systems.forEach(g => {
     const v = g.filter(s => !s.kb); let last = -1;
     v.forEach((s, j) => {
@@ -1434,7 +1436,7 @@ function omrPolyPlan(pages) {
       s.part = k; last = k;
     });
     g.forEach(s => { if (s.kb) s.part = ref.length + (s.kb === 'U' ? 0 : 1); });
-    if (hasKb && !g.some(s => s.kb)) v.forEach(s => { if (ref[s.part] !== s.clefType && s.clefType === 'bass' && !ref.includes('bass')) s.part = ref.length + 1; });
+    if (hasKb && !g.some(s => s.kb)) v.forEach(s => { if ((ref[s.part] !== s.clefType || s.part >= ref.length) && s.clefType === 'bass' && !ref.includes('bass')) s.part = ref.length + 1; else if (s.part >= ref.length) s.part = ref.length; });
   });
   const plan = ref.map(c => ({ kb: null, clef: c }));
   if (hasKb) plan.push({ kb: 'U', clef: 'treble' }, { kb: 'L', clef: 'bass' });
@@ -1548,7 +1550,29 @@ function omrPolySystems(page, barT) {
 // items (the upper voice, or the only one) and v2 (the lower voice, when a staff has two). An item is a note or chord
 // (m: its top note, ch: the others) or a rest (m null; hid: a gap that is not printed). tn: the notes tied on into the
 // next item, tu: 3 for a note of a triplet. A part with no staff in a system rests for its bars.
+// The words under a staff (a PDF carries them as text): each syllable goes to the note it stands under.
+function omrLyrics(page) {
+  if (page._ly || !page.texts || !page.texts.length) return; page._ly = true;
+  page.staves.forEach((st, si) => {
+    if (!st.pe || !st.pe.length) return;
+    const p = st.p, next = page.staves[si + 1], ya = st.bot + 0.8 * p, yb = next && next.top > st.bot ? Math.min(st.bot + 8 * p, next.top - 0.4 * p) : st.bot + 8 * p;
+    const notes = st.pe.filter(e => e.kind === 'note'); if (!notes.length) return;
+    const words = page.texts.filter(t => t.y > ya && t.y < yb && t.x > st.musicStart - 2 * p && t.size >= 1.1 * p && t.size <= 3.6 * p && /[A-Za-zÀ-ɏ&]/.test(t.str)).sort((a, b) => a.y - b.y || a.x - b.x);
+    if (words.length < 2) return;
+    const dashes = page.texts.filter(t => t.y > ya && t.y < yb && /^[-–]+$/.test(t.str));
+    const lines = []; words.forEach(t => { const l = lines.find(q => Math.abs(q.y - t.y) < 0.6 * p); if (l) l.w.push(t); else lines.push({ y: t.y, w: [t] }); });
+    lines.forEach((l, li) => l.w.forEach(t => {
+      const cx = t.x + 0.22 * t.size * t.str.length; let best = null, bd = 2.8 * p;
+      for (const e of notes) { const dd = Math.abs(e.x - cx); if (dd < bd) { bd = dd; best = e; } }
+      if (!best) return;
+      const dash = dashes.some(d => Math.abs(d.y - t.y) < 0.6 * p && d.x > t.x && d.x - t.x < 0.5 * t.size * t.str.length + 3 * p);
+      best.ly = best.ly || []; best.ly[li] = (best.ly[li] ? best.ly[li] + ' ' : '') + t.str + (dash ? '-' : '');
+    }));
+  });
+}
+
 function omrPolyItems(pages, plan, clef, fifthsOverride, barT) {
+  pages.forEach(omrLyrics);
   const parts = plan.map(() => ({ items: [], v2: [], two: false, tied: {} }));
   const R12 = x => Math.round(x * 12) / 12;
   let nBars = 0, nBad = 0;
@@ -1612,6 +1636,7 @@ function omrPolyItems(pages, plan, clef, fifthsOverride, barT) {
               if (e.up != null && two) it.up = e.up;
               if (e.art && e.art.length) it.art = e.art.slice();
               if (e.dyn) it.dyn = e.dyn;
+              if (e.ly) it.ly = e.ly.filter(Boolean).join('\n');
               if (e.gr) it.gr = e.gr;
               if (e.ss) it.ss = e.ss;
               if (e.se) it.se = e.se;
