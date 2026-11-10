@@ -283,7 +283,8 @@ function analyzeBitmap(imgData, opts){
   }
 
   // 5. search bands around each staff (merged when they overlap)
-  const bands = staves.map(st => [Math.max(0, Math.round(st.top - 3.2 * U)), Math.min(H - 1, Math.round(st.bot + 3.6 * U))]).sort((a, b) => a[0] - b[0]);
+  const UPB = opts.thickLedger ? 5.2 : 3.2, DNB = opts.thickLedger ? 5.4 : 3.6, STEP_LO = opts.thickLedger ? -10 : -6, STEP_HI = opts.thickLedger ? 18 : 13;   // (piano music goes further above and below the staff)
+  const bands = staves.map(st => [Math.max(0, Math.round(st.top - UPB * U)), Math.min(H - 1, Math.round(st.bot + DNB * U))]).sort((a, b) => a[0] - b[0]);
   const ranges = [];
   for (const b of bands) { if (ranges.length && b[0] <= ranges[ranges.length-1][1]) ranges[ranges.length-1][1] = Math.max(ranges[ranges.length-1][1], b[1]); else ranges.push([b[0], b[1]]); }
 
@@ -494,7 +495,7 @@ function analyzeBitmap(imgData, opts){
     let b = b0, w = b.maxx - b.minx + 1, h = b.maxy - b.miny + 1;
     // which staff?
     let st = null, bd = 1e9;
-    for (const s of staves) { if (b.cy < s.top - 3.2 * U || b.cy > s.bot + 3.6 * U) continue; const dd = Math.abs(b.cy - (s.top + s.bot) / 2); if (dd < bd) { bd = dd; st = s; } }
+    for (const s of staves) { if (b.cy < s.top - UPB * U || b.cy > s.bot + DNB * U) continue; const dd = Math.abs(b.cy - (s.top + s.bot) / 2); if (dd < bd) { bd = dd; st = s; } }
     if (!st) { R(b, 'nostaff'); continue; }
     const p = st.p;
     if (b.cx < st.left + 3.2 * p || b.cx > st.right + 0.5 * p) { R(b, 'clefzone'); continue; }
@@ -518,6 +519,20 @@ function analyzeBitmap(imgData, opts){
         continue;
       }
     }
+    // Two notes a step apart in a chord sit side by side, the lower one on the left and the upper one on the right,
+    // and join into one wide shape: two heads, half a space apart in height.
+    if (opts.thickLedger && w >= 1.7 * p && w <= 2.7 * p && h >= 1.15 * p && h <= 2.0 * p) {
+      const xm = (b.minx + b.maxx) / 2; let nl = 0, nr = 0, lx = 0, ly = 0, rx = 0, ry = 0;
+      for (let y = b.miny; y <= b.maxy; y++) for (let x = b.minx; x <= b.maxx; x++) if (core[y*W + x]) { if (x < xm) { nl++; lx += x; ly += y; } else { nr++; rx += x; ry += y; } }
+      if (nl > 0.25 * p * p && nr > 0.25 * p * p && nl / nr > 0.6 && nl / nr < 1.7) {
+        lx /= nl; ly /= nl; rx /= nr; ry /= nr;
+        const sL = Math.round((ly - st.top) / (p / 2)), sR = Math.round((ry - st.top) / (p / 2));
+        if (ly - ry >= 0.3 * p && ly - ry <= 0.75 * p && sL - sR === 1 && sR >= STEP_LO && sL <= STEP_HI && ellipseFill(lx, st.top + sL * p / 2, p) >= 0.75 && ellipseFill(rx, st.top + sR * p / 2, p) >= 0.75) {
+          for (const [hx, stp, ar] of [[lx, sL, nl], [rx, sR, nr]]) notes.push({ x: hx, y: st.top + stp * p / 2, step: stp, p, stemUp: null, staff: staves.indexOf(st), area: ar, w: w / 2, pair: b.minx + ':' + b.miny });
+          continue;
+        }
+      }
+    }
     // an accidental printed hard against its note joins it into one blob: the note is the right-hand part
     if (w > 1.35 * p && w <= 2.9 * p && (w > 1.7 * p || (strokeCov(b, -1, p) >= 0.12 && strokeCov(b, 1, p) >= 0.12))) {
       const x0 = Math.round(b.maxx - 1.15 * p); let n = 0, sx = 0, sy = 0, miny = 1e9, maxy = -1;
@@ -535,7 +550,7 @@ function analyzeBitmap(imgData, opts){
       const raw = (hd.y - st.top) / (p / 2);
       const step = Math.round(raw);
       if (Math.abs(raw - step) > hd.tol * 2) { R(b, 'offgrid', { raw: +raw.toFixed(2) }); continue; }     // not sitting on a line or space
-      if (step < -6 || step > 13) { R(b, 'range', { step }); continue; }
+      if (step < STEP_LO || step > STEP_HI) { R(b, 'range', { step }); continue; }
       const sy = st.top + step * p / 2;
       // a beam is thick too, but it runs on sideways well past where a notehead would end
       const hrun = yy => { yy = Math.round(yy); const x0 = Math.round(hd.x); if (yy < 0 || yy >= H || !filled[yy*W + x0]) return 0; let l = x0, r = x0; while (l > 0 && filled[yy*W + l - 1]) l--; while (r < W - 1 && filled[yy*W + r + 1]) r++; return r - l + 1; };
@@ -610,11 +625,18 @@ function omrReadPage(imgData, again) {
   // a dot is small and round: nothing dark straight above, below or beside it (a short upright mark fails)
   const hasDot = (x, y, p) => { for (let dx = 0.8; dx <= 1.75; dx += 0.1) { const cx = x + dx * p, r = 0.34 * p; if (discFill(cx, y, 0.16 * p) >= 0.8 && ringFill(cx, y, 0.3 * p, 0.46 * p) <= 0.22 && !dark(Math.round(cx), Math.round(y - r)) && !dark(Math.round(cx), Math.round(y + r)) && !dark(Math.round(cx - r), Math.round(y)) && !dark(Math.round(cx + r), Math.round(y))) return true; } return false; };
   const runLen = (x, y0, dir, max) => { let len = 0, last = 0, gap = 0, y = y0; while (len < max) { y += dir; len++; if (y < 0 || y >= H) break; if (filled[y * W + x]) { last = len; gap = 0; } else if (++gap > Math.max(2, LT)) break; } return last; };
-  const bandCount = (x, ya, yb, p, sx, thickOnly) => { const a = Math.round(Math.min(ya, yb)), b = Math.round(Math.max(ya, yb)), xi = Math.round(x); let runs = 0, run = 0; const lo = thickOnly ? 0.3 * p : Math.max(2, 0.16 * p), hi = 0.9 * p;
+  const runsBack = (x0, y0, sx, tipY, p) => { let y = y0; const tx = Math.round(sx), dx = tx > x0 ? 1 : -1;
+    for (let xx = x0; xx !== tx; xx += dx) { if (clean[y * W + xx]) continue; let moved = false; for (const d of [-1, 1, -2, 2]) if (clean[(y + d) * W + xx]) { y += d; moved = true; break; } if (!moved) return false; }
+    return Math.abs(y - tipY) <= 0.6 * p; };
+  const bandCount = (x, ya, yb, p, sx, thickOnly, tipY) => { const a = Math.round(Math.min(ya, yb)), b = Math.round(Math.max(ya, yb)), xi = Math.round(x); let runs = 0, run = 0; const lo = thickOnly ? 0.3 * p : Math.max(2, 0.16 * p), hi = 0.9 * p;
     // (sx: the stem's place. Then a band only counts if it runs unbroken from there to x.)
     const joined = ym => { if (sx == null) return true; let gap = 0; for (let xx = Math.min(xi, Math.round(sx)); xx <= Math.max(xi, Math.round(sx)); xx++) { if (xx >= 0 && xx < W && clean[ym * W + xx]) gap = 0; else if (++gap > 2) return false; } return true; };
     const anyJoined = (y0, y1) => { for (let y = y0; y <= y1; y += 2) if (joined(y)) return true; return joined(y1); };   // (a flag leaves the stem as it curls down)
-    for (let y = a; y <= b + 1; y++) { if (y <= b && xi >= 0 && xi < W && y >= 0 && y < H && clean[y * W + xi]) run++; else { if (run >= lo && run <= hi && anyJoined(y - run, y - 1)) runs++; run = 0; } } return runs; };
+    for (let y = a; y <= b + 1; y++) { if (y <= b && xi >= 0 && xi < W && y >= 0 && y < H && clean[y * W + xi]) run++; else { if (run >= lo && run <= hi && anyJoined(y - run, y - 1)) {
+        // past the stem's end only a thick beam that runs back to the stem's end counts (not words, not another voice's beam)
+        const ym = Math.round(y - 1 - run / 2), beyond = tipY != null && (ym - tipY) * (ya - tipY) > 0;
+        if (!beyond || (run >= 0.3 * p && runsBack(xi, ym, sx, tipY, p))) runs++;
+      } run = 0; } } return runs; };   // (past the stem's end only a thick beam counts, not words)
   const med3 = a => a.sort((x, y) => x - y)[1];
 
   // ---------- accidentals (sharp, flat, natural) as separate shapes left of noteheads ----------
@@ -825,12 +847,23 @@ function omrReadPage(imgData, again) {
       const cols = [];
       for (const h of info) {
         const c = cols[cols.length - 1];
-        if (c && c.some(m => Math.abs(h.n.x - m.n.x) < 0.7 * p || (Math.abs(h.n.x - m.n.x) < 1.4 * p && Math.abs(h.n.step - m.n.step) === 1))) c.push(h); else cols.push([h]);
+        // (two notes a step apart on ONE stem: the upper one right of the lower one, no stem on the outer side of either)
+        const sideStem = (n, side) => { for (let x = Math.round(n.x + side * 0.45 * p); x !== Math.round(n.x + side * 0.85 * p); x += side) if (runLen(x, Math.round(n.y), -1, 4 * p) >= 2 * p || runLen(x, Math.round(n.y), 1, 4 * p) >= 2 * p) return true; return false; };
+        if (c && c.some(m => Math.abs(h.n.x - m.n.x) < 0.7 * p || (Math.abs(h.n.x - m.n.x) < 1.4 * p && Math.abs(h.n.step - m.n.step) === 1) || (h.n.pair && m.n.pair === h.n.pair) ||
+          (again && h.n.x - m.n.x < 1.75 * p && h.n.x > m.n.x && h.n.step === m.n.step - 1 && !sideStem(m.n, -1) && !sideStem(h.n, 1)))) c.push(h); else cols.push([h]);
+      }
+      // (a note set to one side of its chord can come before the chord's other notes: join neighbouring groups that
+      //  hold two notes a step apart, close enough to share a stem)
+      for (let i = cols.length - 1; i > 0; i--) {
+        const A = cols[i - 1], B = cols[i];
+        if (A.some(m => B.some(h => Math.abs(h.n.x - m.n.x) < 1.4 * p && Math.abs(h.n.step - m.n.step) === 1)) && Math.max(...B.map(h => h.n.x)) - Math.min(...A.map(h => h.n.x)) < 1.5 * p) { cols[i - 1] = A.concat(B); cols.splice(i, 1); }
       }
       const stemFrom = (hs, dir) => {
         const o = dir < 0 ? hs[0] : hs[hs.length - 1]; let best = { len: 0, x: Math.round(o.n.x), dir };
         const xa = Math.round(Math.min(...hs.map(h => h.n.x)) - 0.85 * p), xb = Math.round(Math.max(...hs.map(h => h.n.x)) + 0.85 * p);
-        for (let x = xa; x <= xb; x++) { const len = runLen(x, Math.round(o.n.y), dir, 7 * p); if (len > best.len) best = { len, x, dir }; }
+        // (a stem touches its head: a sharp, flat or natural beside the head has upright strokes too, but stands apart)
+        const yo = Math.round(o.n.y), touches = x => { let gap = 0; const x2 = Math.round(o.n.x); for (let xx = Math.min(x, x2); xx <= Math.max(x, x2); xx++) { if (filled[yo * W + xx] || filled[(yo - 2) * W + xx] || filled[(yo + 2) * W + xx]) gap = 0; else if (++gap > 2) return false; } return true; };
+        for (let x = xa; x <= xb; x++) { const len = runLen(x, yo, dir, (again ? 9 : 7) * p); if (len > best.len && (!again || touches(x))) best = { len, x, dir }; }   // (stems to a far beam are long in piano music)
         best.has = best.len - 0.4 * p >= 1.6 * p; return best;
       };
       const make = (hs, s) => {
@@ -838,7 +871,9 @@ function omrReadPage(imgData, again) {
         let bands = 0;
         if (has && !hollow && !breve) {
           const o = s.dir < 0 ? hs[0] : hs[hs.length - 1], tip = o.n.y + s.dir * s.len, to = tip - s.dir * Math.min(2.5 * p, Math.max(1.7 * p, s.len - 1.0 * p));
-          const beam = [1, -1].map(sg => Math.max(med3([0.35, 0.55, 0.75].map(dx => bandCount(s.x + sg * dx * p, tip, to, p, s.x, sg < 0))), med3([0.9, 1.25, 1.6].map(dx => bandCount(s.x + sg * dx * p, tip, to, p, s.x, true)))));
+          // (a slanted beam lies a little past the stem's end on one side of the stem)
+          const tipX = again ? tip + s.dir * 0.9 * p : tip;
+          const beam = [1, -1].map(sg => Math.max(med3([0.35, 0.55, 0.75].map(dx => bandCount(s.x + sg * dx * p, tipX, to, p, s.x, sg < 0, tip))), med3([0.9, 1.25, 1.6].map(dx => bandCount(s.x + sg * dx * p, tipX, to, p, s.x, true, tip)))));
           const flag = med3([0.4, 0.6, 0.8].map(dx => bandCount(s.x + dx * p, tip, to, p, s.x)));
           bands = Math.max(beam[0], beam[1], flag);
         }
