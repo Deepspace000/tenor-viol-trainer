@@ -1998,7 +1998,7 @@ function addScanned(list){
   made.forEach(m=>{const same=made.filter(x=>x.name===m.name);if(same.length>1)m.name+=' '+(same.indexOf(m)+1);});
   // with notes already in the score: replace them, or add each part to the part at the same place
   const fresh=sc.parts.every(p=>!p.items.length)||confirm(`Replace the notes you have with the ${made.length} parts read from the score?\n\nOK replaces them. Cancel adds each part to the end of the part in the same place.`);
-  if(fresh)sc.parts=made.map(m=>Object.assign(newPart(m.name,m.clef,m.sound,m.pan),{mainClef:m.mainClef,items:m.items}));
+  if(fresh)sc.parts=made.map(m=>Object.assign(newPart(m.name,m.clef,m.sound,m.pan),{mainClef:m.mainClef,items:m.items,pb:true}));
   else made.forEach((m,i)=>{const p=sc.parts[i]||(sc.parts[i]=newPart(m.name,m.clef,m.sound,m.pan));p.hist.push(JSON.stringify(p.items));p.items=p.items.concat(m.items);});
   const ti=sc.parts.findIndex(p=>/Tenor/.test(p.name));sc.pi=ti>=0?ti:0;sc.sel=-1;sc.cur=sc.items.length;
   if(fresh){let every=false;try{every=localStorage.getItem('tenor-viol-neckmode')==='every';}catch(e){}sc.neckPart=every?-1:sc.pi;}   // the tenor part, or a neck for each part if you chose that last
@@ -2067,7 +2067,9 @@ function addScannedPart(list,override,barT){
     const ts=(f&&f.pieceTs)||printedTs()||tsFromBar(expectedBar());if(ts){sc.ts=ts;$('tsn').value=ts[0];$('tsd').value=ts[1];}
   }
   // the clef this part is usually printed in (pieces in another clef are shown in theirs)
-  {const cl={};list.forEach(sp=>sp.page.staves.forEach(s=>{if(s.clefType)cl[s.clefType]=(cl[s.clefType]||0)+1;}));const mc=Object.keys(cl).sort((a,b)=>cl[b]-cl[a])[0];if(mc&&!part().mainClef)part().mainClef=mc;}
+  {const cl={};list.forEach(sp=>sp.page.staves.forEach(s=>{if(s.clefType)cl[s.clefType]=(cl[s.clefType]||0)+1;}));const mc=Object.keys(cl).sort((a,b)=>cl[b]-cl[a])[0];if(mc&&!part().mainClef)part().mainClef=mc;
+    if(wasEmpty){part().pb=true;   // the bars are the printed ones
+      if((mc==='treble'||mc==='bass')&&!part().clef){part().clef=mc;if(part().name==='Tenor viol'){part().name=mc==='treble'?'Melody':'Bass line';part().sound=mc==='treble'?'violin':'cello';}}}}
   sc.items.splice(sc.cur,0,...items);sc.cur+=items.length;sc.sel=-1;drawRecording();buildParts();buildFrom();
   const out=items.filter(i=>i.m!=null&&(i.m<OPEN[5]||i.m>OPEN[0]+st.frets)).length;
   const pieces=items.filter(i=>i.sec).length;
