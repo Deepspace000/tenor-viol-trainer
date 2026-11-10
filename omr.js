@@ -207,7 +207,7 @@ function analyzeBitmap(imgData, opts){
       if (g) { g.minx = Math.min(g.minx, c.minx); g.maxx = Math.max(g.maxx, c.maxx); g.miny = Math.min(g.miny, c.miny); g.maxy = Math.max(g.maxy, c.maxy); g.pix = g.pix.concat(c.pix); g.area += c.area; g.w = g.maxx - g.minx + 1; g.h = g.maxy - g.miny + 1; }
       else signs.push({ ...c, pix: c.pix.slice() });
     }
-    const cands = signs.filter(c => c.minx >= zone && c.h >= 2.15 * p && c.h <= 3.4 * p && c.w >= 0.35 * p && c.w <= 1.05 * p).sort((a, b) => a.minx - b.minx);
+    const cands = signs.filter(c => c.minx >= zone && c.h >= 2.15 * p && c.h <= 3.4 * p && c.w >= 0.35 * p && c.w <= (opts.thickLedger ? 1.3 : 1.05) * p).sort((a, b) => a.minx - b.minx);
     let lastX = -1; const keyAccs = [];
     for (const c of cands) {
       if (lastX >= 0 && c.minx - lastX > 1.4 * p) break;                       // past the key signature
@@ -275,6 +275,22 @@ function analyzeBitmap(imgData, opts){
           const mirror = either ? both / either : 0;
           // (C and cut C give the same length of bar; it only counts as cut time when its stroke sticks out well past the C)
           if (L >= 0.6 && R <= 0.5 && mirror >= 0.55) { st.tsSym = c1.h >= 2.6 * p ? [2, 2] : [4, 4]; ms = Math.max(ms, c1.maxx); }
+        }
+      }
+      if (!tsx && !st.tsSym && opts.thickLedger) {
+        // a C in pieces (its thin ends are lost): together the pieces are a round sign on the middle line, the same
+        // upside down, with a tall back on the left and open on the right
+        const g = comps.filter(c => c.minx >= afterKey - 0.3 * p && c.minx < afterKey + 2.6 * p && c.miny >= st.top + 0.4 * p && c.maxy <= st.bot - 0.4 * p && c.h >= 0.5 * p).sort((a, b) => a.minx - b.minx);
+        const g1 = g.length ? g.filter(c => c.minx - g[0].minx <= 1.6 * p) : [];
+        if (g1.length >= 1 && g1.length <= 3 && g1[0].h >= 1.5 * p && g1[0].w <= 1.1 * p) {
+          const x0 = g1[0].minx, x1 = Math.max(...g1.map(c => c.maxx)), y0 = Math.min(...g1.map(c => c.miny)), y1 = Math.max(...g1.map(c => c.maxy)), uw = x1 - x0 + 1, uh = y1 - y0 + 1;
+          if (uw >= 0.8 * p && uw <= 1.9 * p && uh >= 1.6 * p && uh <= 2.7 * p && Math.abs((y0 + y1) / 2 - (st.top + 2 * p)) <= 0.45 * p) {
+            const grid = new Uint8Array(uw * uh);
+            for (const c of g1) for (const q of c.pix) { const gx = q % W - x0, gy = Math.floor(q / W) - y0; if (gx >= 0 && gx < uw && gy >= 0 && gy < uh) grid[gy * uw + gx] = 1; }
+            let both = 0, either = 0, mid = 0, midN = 0;
+            for (let gy = 0; gy < uh; gy++) for (let gx = 0; gx < uw; gx++) { const a = grid[gy * uw + gx], b = grid[(uh - 1 - gy) * uw + gx]; if (a && b) both++; if (a || b) either++; if (gx >= 0.6 * uw && gy >= 0.42 * uh && gy <= 0.58 * uh) { midN++; if (a) mid++; } }
+            if (either && both / either >= 0.4 && midN && mid / midN <= 0.2) { st.tsSym = [4, 4]; ms = Math.max(ms, x1); }
+          }
         }
       }
       st.musicStart = ms + 0.4 * p;
@@ -541,7 +557,9 @@ function analyzeBitmap(imgData, opts){
     }
     if (w < MIN_CORE_W * p || w > 2.1 * p) { R(b, 'width', { wU: +(w / p).toFixed(2) }); continue; }
     // sharps and naturals: vertical strokes continue both above and below the filled centre
-    if (strokeCov(b, -1, p) >= 0.12 && strokeCov(b, 1, p) >= 0.12 && !stemThrough(b, p)) { R(b, 'strokes'); continue; }
+    // (on a piano page a full-sized solid head stays even with marks above and below it: its stem on one side, a slur,
+    //  an accent or a fingering number on the other. The filled middle of a sharp or natural is much narrower.)
+    if (strokeCov(b, -1, p) >= 0.12 && strokeCov(b, 1, p) >= 0.12 && !stemThrough(b, p) && !(opts.thickLedger && w >= 1.0 * p && w <= 1.5 * p && h >= 0.75 * p && h <= 1.25 * p && ellipseFill(b.cx, b.cy, p) >= 0.9)) { R(b, 'strokes'); continue; }
     let heads = [];
     if (h >= 0.5 * p && h <= 1.5 * p) { if (b.area < 0.28 * p * p) { R(b, 'area'); continue; } heads.push({ x: b.cx, y: b.cy, tol: 0.3 }); }
     else if (h > 1.5 * p && h <= 3.5 * p && w <= 1.7 * p) { const n = Math.max(2, Math.round(h / p)); for (let k = 0; k < n; k++) heads.push({ x: b.cx, y: b.miny + (k + 0.5) * h / n, tol: 0.4 }); }
@@ -1188,7 +1206,7 @@ function omrReadPage(imgData, again) {
     if (top && top.voltas.length) grp.forEach(s => { if (s !== top) s.voltas = top.voltas; });
     if (grp.length > 1) {
       const withTs = grp.filter(s => s.ts);
-      if (withTs.length * 2 > grp.length) {
+      if (withTs.length * 2 > grp.length || (again && withTs.length * 2 >= grp.length)) {   // (on a piano page one of its two staves is enough)
         const cnt = {}; withTs.forEach(s => { const k2 = s.ts.join('/'); cnt[k2] = (cnt[k2] || 0) + 1; });
         const best = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0].split('/').map(Number);
         const sym = withTs.filter(s => s.tsC).length * 2 > withTs.length ? withTs.find(s => s.tsC).tsC : null;   // C or cut C, if most staves show it
