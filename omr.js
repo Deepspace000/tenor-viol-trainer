@@ -251,9 +251,9 @@ function analyzeBitmap(imgData, opts){
       if (!tsx && opts.thickLedger) {   // (only on a page with a piano part or chords)
         const near2 = comps.filter(c => c.minx >= afterKey - 0.3 * p && c.minx < afterKey + 4.5 * p && c.h >= 1.2 * p && c.h <= 4.4 * p && c.w >= 0.5 * p && c.miny >= st.top - 0.45 * p && c.maxy <= st.bot + 0.45 * p).sort((a, b) => a.minx - b.minx);
         if (near2.length >= 2) {
-          const g = near2.filter(c => c.minx - near2[0].minx <= 1.9 * p);
+          const g = near2.filter(c => c.minx - near2[0].minx <= 2.5 * p);
           const x0 = Math.min(...g.map(c => c.minx)), x1 = Math.max(...g.map(c => c.maxx)), y0 = Math.min(...g.map(c => c.miny)), y1 = Math.max(...g.map(c => c.maxy));
-          if (g.length >= 2 && g.length <= 5 && x1 - x0 + 1 >= 1.3 * p && x1 - x0 + 1 <= 3.1 * p && Math.abs(y0 - st.top) <= 0.45 * p && Math.abs(y1 - st.bot) <= 0.45 * p) { tsx = [x0, x1]; ms = Math.max(ms, x1); }
+          if (g.length >= 2 && g.length <= 6 && x1 - x0 + 1 >= 1.3 * p && x1 - x0 + 1 <= 3.5 * p && Math.abs(y0 - st.top) <= 0.45 * p && Math.abs(y1 - st.bot) <= 0.45 * p) { tsx = [x0, x1]; ms = Math.max(ms, x1); }
         }
       }
       st.tsBox = tsx;            // where the time signature's two numbers are, if there is one
@@ -593,6 +593,10 @@ function analyzeBitmap(imgData, opts){
       if (opts.ledger && (step <= -2 || step >= 10)) {
         const ls = step >= 10 ? (step % 2 === 0 ? step : step - 1) : (step % 2 === 0 ? step : step + 1);
         if (!ledgerOk(hd.x, st.top + ls * p / 2, p)) { R(b, 'ledger', { step }); continue; }
+        if (opts.thickLedger && (ls >= 12 || ls <= -4)) {
+          let all = true; for (let q = ls >= 12 ? 10 : -2; ls >= 12 ? q < ls : q > ls; q += ls >= 12 ? 2 : -2) if (!ledgerOk(hd.x, st.top + q * p / 2, p)) all = false;
+          if (!all) { R(b, 'ledger', { step }); continue; }
+        }
       }
       // stem direction: right side going up, or left side going down
       const up = darkFrac(hd.x + 0.35 * p, hd.x + 0.7 * p, sy - 2.2 * p, sy - 0.8 * p);
@@ -876,6 +880,18 @@ function omrReadPage(imgData, again) {
         const A = cols[i - 1], B = cols[i];
         if (A.some(m => B.some(h => Math.abs(h.n.x - m.n.x) < 1.4 * p && Math.abs(h.n.step - m.n.step) === 1)) && Math.max(...B.map(h => h.n.x)) - Math.min(...A.map(h => h.n.x)) < 1.5 * p) { cols[i - 1] = A.concat(B); cols.splice(i, 1); }
       }
+      // (the curl of a flag is thick enough to pass for a small head on the stem: in a group, a shape much smaller than
+      //  the group's real head, further along the stem, is dropped)
+      if (false) for (let i = 0; i < cols.length; i++) {
+        const c = cols[i]; if (c.length < 2) continue;
+        // (a flag's curl encloses a little space and so looks like a hollow head: a group never mixes solid and hollow
+        //  heads on one stem, so the kind of its biggest head decides)
+        if (c.every(h => h.hollow) || c.every(h => !h.hollow)) continue;
+        const big = c.reduce((a, h) => (h.n.area || 0) > (a.n.area || 0) ? h : a, c[0]);
+        if (big.hollow) continue;   // (only a hollow shape smaller than the group's solid head is a flag's curl; a minim beside a crotchet stays)
+        const keep = c.filter(h => !h.hollow || h.n.pair || (h.n.area || 0) >= 0.8 * (big.n.area || 1));
+        if (keep.length && keep.length < c.length) cols[i] = keep;
+      }
       const stemFrom = (hs, dir) => {
         const o = dir < 0 ? hs[0] : hs[hs.length - 1]; let best = { len: 0, x: Math.round(o.n.x), dir };
         const xa = Math.round(Math.min(...hs.map(h => h.n.x)) - 0.85 * p), xb = Math.round(Math.max(...hs.map(h => h.n.x)) + 0.85 * p);
@@ -903,9 +919,12 @@ function omrReadPage(imgData, again) {
         pe.push({ kind: 'note', x: has && s.dir > 0 ? Math.max(...xs) : Math.min(...xs), y: hs[0].n.y, d, dotted, up: has ? s.dir < 0 : null, hollow, bands,
           notes: hs.map(h => ({ x: h.n.x, y: h.n.y, step: h.n.step, half: h.n.breve ? h.n.w / 2 : 0.6 * p, accOff: h.acc ? h.acc.type : null, accBox: h.acc })) });
       };
-      for (const hs of cols) {
+      for (let hs of cols) {
         hs.sort((a, b) => a.n.y - b.n.y);
-        const su = stemFrom(hs, -1), sd = stemFrom(hs, 1);
+        let su = stemFrom(hs, -1), sd = stemFrom(hs, 1);
+        // (a flag's curl encloses a little space and looks like a hollow head hanging on the note's own stem: with one
+        //  stem only, hollow shapes beside a solid head are dropped. Two voices in one place have two stems.)
+        if (again && hs.length > 1 && !(su.has && sd.has) && hs.some(h => h.hollow) && hs.some(h => !h.hollow)) { const solid = hs.filter(h => !h.hollow || h.n.pair); if (solid.length) { hs = solid; su = stemFrom(hs, -1); sd = stemFrom(hs, 1); } }
         if (su.has && sd.has && hs.length > 1) {
           // two voices in one place: the upper heads hang on the stem going up, the lower ones on the stem going down
           const top = hs[0].n.y, bot = hs[hs.length - 1].n.y;
@@ -953,7 +972,7 @@ function omrReadPage(imgData, again) {
             if (Math.abs(mx - cx) > 0.5 * p) continue;
             // (a ledger line lies between the note and the staff, on a line's place; a dash is shorter)
             const onLine = Math.abs((my - st.top) / p - Math.round((my - st.top) / p)) < 0.2 && (my < st.top || my > st.bot);
-            if (c.w >= 0.22 * p && c.w <= 0.6 * p && c.h >= 0.22 * p && c.h <= 0.6 * p && Math.abs(c.w - c.h) <= 0.18 * p && c.w <= 1.5 * c.h && fill >= 0.6 && Math.abs(my - (sg > 0 ? botY : topY)) <= 2.0 * p) { if (!e.art.includes('st')) e.art.push('st'); }
+            if (c.w >= 0.22 * p && c.w <= 0.6 * p && c.h >= 0.22 * p && c.h <= 0.6 * p && Math.abs(c.w - c.h) <= 0.18 * p && c.w <= 1.5 * c.h && fill >= 0.6 && Math.abs(my - (sg > 0 ? botY : topY)) <= 2.0 * p && Math.abs(mx - cx) <= 0.42 * p) { if (!e.art.includes('st')) e.art.push('st'); }
             else if (c.w >= 0.7 * p && c.w <= 1.5 * p && c.h <= 0.34 * p && fill >= 0.7 && !onLine) { if (!e.art.includes('te')) e.art.push('te'); }
             else if (c.w >= 0.9 * p && c.w <= 1.9 * p && c.h >= 0.45 * p && c.h <= 1.25 * p && fill <= 0.6) {
               // a wedge open to the left: its left end is as tall as the sign, its right end a point in the middle
@@ -1198,7 +1217,7 @@ function omrReadPage(imgData, again) {
       }
       if (poly) { grp.forEach(s => s.poly = true); out.poly = true; }
       const hasKb = grp.some(s => s.kb);
-      grp.forEach(s => s.pe.forEach(e => { const v = hasKb && !s.kb ? e.dynA : e.dynB; if (v) e.dyn = v; }));
+      grp.forEach(s => s.pe.forEach(e => { const v = hasKb && !s.kb ? e.dynA : s.kb === 'L' ? null : e.dynB; if (v) e.dyn = v; }));
     }
   }
   for (const k in bySys) {
