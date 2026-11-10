@@ -1372,58 +1372,92 @@ function omrPolySystems(page, barT) {
   return out;
 }
 
-// The score items of every part (plan: omrPolyPlan), from the timed bars. An item is what sounds from one moment to the
-// next: m is its top note, ch the other notes of the chord, tn the notes that carry on into the next item (a longer
-// note in another voice, or a tie). A part with no staff in a system rests for its bars.
+// The score items of every part (plan: omrPolyPlan), from the timed bars. Each part has one or two voices on its staff:
+// items (the upper voice, or the only one) and v2 (the lower voice, when a staff has two). An item is a note or chord
+// (m: its top note, ch: the others) or a rest (m null; hid: a gap that is not printed). tn: the notes tied on into the
+// next item, tu: 3 for a note of a triplet. A part with no staff in a system rests for its bars.
 function omrPolyItems(pages, plan, clef, fifthsOverride, barT) {
-  const parts = plan.map(() => ({ items: [], wait: null, tied: {} }));
+  const parts = plan.map(() => ({ items: [], v2: [], two: false, tied: {} }));
+  const R12 = x => Math.round(x * 12) / 12;
   let nBars = 0, nBad = 0;
   for (const page of pages) for (const sy of omrPolySystems(page, barT)) {
     const top = sy.grp[0], secSrc = sy.grp.find(s => s.sec);
     sy.bars.forEach((bar, bi) => {
       nBars++; if (bar.bad) nBad++;
-      const mid = (bar.x0 + bar.x1) / 2, vol = (top.voltas || []).find(v => mid >= v.x0 && mid <= v.x1);
+      const mid = (bar.x0 + bar.x1) / 2, vol = (top.voltas || []).find(v => mid >= v.x0 && mid <= v.x1), L = bar.L;
       parts.forEach((P, pi) => {
-        const gi = sy.grp.findIndex(s => s.part === pi), st = gi >= 0 ? sy.grp[gi] : null, first = P.items.length, notes = [];
+        const gi = sy.grp.findIndex(s => s.part === pi), st = gi >= 0 ? sy.grp[gi] : null;
+        const evs = st ? bar.evs[gi].filter(e => e.t != null && e.pd > 0).sort((a, b) => a.t - b.t || a.x - b.x) : [];
         if (st) {
-          const topDia = OMR_TOPDIA[st.clefType] || OMR_TOPDIA[clef] || 32, carry = {};
+          const topDia = OMR_TOPDIA[st.clefType] || OMR_TOPDIA[clef] || 32, carry = {}, tiedOut = {};
           const keyOff = omrKeyOff(fifthsOverride != null ? fifthsOverride : st.keyFinal != null ? st.keyFinal : st.fifths);
-          bar.evs[gi].filter(e => e.kind === 'note' && e.t != null).sort((a, b) => a.t - b.t || a.x - b.x).forEach(e => e.notes.forEach(h => {
-            const dia = topDia - h.step, letter = OMR_LET[((dia % 7) + 7) % 7], oct = Math.floor(dia / 7);
-            let off = keyOff[letter];
-            if (h.accOff != null) { off = h.accOff; carry[dia] = off; } else if (carry[dia] != null) off = carry[dia];
-            let m = 12 * (oct + 1) + OMR_BASE[letter] + off;
-            if (e.t === 0 && h.accOff == null && P.tied[dia] != null) m = P.tied[dia];   // tied over the bar line: still the same note
-            notes.push({ t: e.t, end: Math.round((e.t + e.pd) * 12) / 12, m, dia, tie: !!h.tie });
-          }));
-        }
-        const cut = [...new Set([0].concat(notes.map(n => n.t), notes.map(n => n.end)))].filter(t => t < bar.L).sort((a, b) => a - b);
-        cut.forEach((t, i) => {
-          const t2 = i + 1 < cut.length ? cut[i + 1] : bar.L, on = notes.filter(n => n.t <= t && n.end > t);
-          const ms = [...new Set(on.map(n => n.m))].sort((a, b) => b - a), it = { m: ms.length ? ms[0] : null, d: t2 - t };
-          if (ms.length > 1) it.ch = ms.slice(1);
-          if (i === 0 && P.wait) { const keep = P.wait.ms.filter(m => notes.some(n => n.m === m && n.t === 0)); if (keep.length) P.wait.item.tn = (P.wait.item.tn || []).concat(keep); }
-          if (i === 0) P.wait = null;
-          const tn = ms.filter(m => on.some(n => n.m === m && n.end > t2) || (t2 < bar.L && on.some(n => n.m === m && n.tie && n.end === t2) && notes.some(n => n.m === m && n.t === t2)));
-          if (tn.length) it.tn = tn;
-          if (t2 >= bar.L) {
-            const w = ms.filter(m => on.some(n => n.m === m && n.tie && n.end >= bar.L));
-            P.wait = w.length ? { item: it, ms: w } : null; P.tied = {};
-            on.forEach(n => { if (n.tie && n.end >= bar.L) P.tied[n.dia] = n.m; });
+          for (const e of evs) {
+            if (e.kind !== 'note') continue;
+            e.ms = []; e.tnm = [];
+            for (const h of e.notes) {
+              const dia = topDia - h.step, letter = OMR_LET[((dia % 7) + 7) % 7], oct = Math.floor(dia / 7);
+              let off = keyOff[letter];
+              if (h.accOff != null) { off = h.accOff; carry[dia] = off; } else if (carry[dia] != null) off = carry[dia];
+              let m = 12 * (oct + 1) + OMR_BASE[letter] + off;
+              if (e.t === 0 && h.accOff == null && P.tied[dia] != null) m = P.tied[dia];   // tied over the bar line: still the same note
+              if (!e.ms.includes(m)) e.ms.push(m);
+              if (h.tie) { e.tnm.push(m); if (R12(e.t + e.pd) >= L - 0.01) tiedOut[dia] = m; }
+            }
           }
-          P.items.push(it);
+          P.tied = tiedOut;
+        } else P.tied = {};
+        // one voice, or two: where notes overlap in time the stems tell the voices apart (up: upper voice)
+        const over = (a, b) => a.t < b.t + b.pd - 0.01 && b.t < a.t + a.pd - 0.01;
+        const two = evs.some((a, i) => evs.some((b, j) => j > i && over(a, b))), V = [[], []];
+        for (const e of evs) {
+          if (!two) { V[0].push(e); continue; }
+          let w = e.kind === 'rest' ? (e.whole ? 0 : e.y < st.top + 2 * st.p ? 0 : 1) : e.up === false ? 1 : 0;
+          if (V[w].some(o => over(o, e))) w = 1 - w;
+          if (V[w].some(o => over(o, e))) {
+            if (e.kind !== 'note') continue;
+            const same = V[0].concat(V[1]).find(o => o.kind === 'note' && Math.abs(o.t - e.t) < 0.01);   // no room in either voice: part of the chord that starts with it
+            if (same) { e.ms.forEach(m => { if (!same.ms.includes(m)) same.ms.push(m); }); e.tnm.forEach(m => { if (!same.tnm.includes(m)) same.tnm.push(m); }); }
+            continue;
+          }
+          V[w].push(e);
+        }
+        if (two) P.two = true;
+        const first = [P.items.length, P.v2.length];
+        V.forEach((list, vi) => {
+          const out = vi ? P.v2 : P.items, hidGap = two || vi === 1; let c = 0;
+          list.sort((a, b) => a.t - b.t);
+          for (const e of list) {
+            if (e.t > c + 0.01) out.push(Object.assign({ m: null, d: R12(e.t - c) }, hidGap ? { hid: true } : {}));
+            const d = R12(Math.min(e.pd, L - e.t));
+            if (e.kind === 'rest') out.push({ m: null, d });
+            else {
+              const ms = e.ms.slice().sort((a, b) => b - a), it = { m: ms[0], d };
+              if (ms.length > 1) it.ch = ms.slice(1);
+              if (e.tnm.length) it.tn = e.tnm.slice();
+              if (e.tu) it.tu = e.tu;
+              if (e.up != null && two) it.up = e.up;
+              if (e.art && e.art.length) it.art = e.art.slice();
+              if (e.dyn) it.dyn = e.dyn;
+              if (e.gr) it.gr = e.gr;
+              if (e.ss) it.ss = e.ss;
+              if (e.se) it.se = e.se;
+              out.push(it);
+            }
+            c = R12(e.t + d);
+          }
+          if (c < L - 0.01) out.push(Object.assign({ m: null, d: R12(L - c) }, (hidGap && list.length) || vi === 1 ? { hid: true } : {}));
         });
-        const f0 = P.items[first], l0 = P.items[P.items.length - 1];
-        f0.bar = page.no + '.' + sy.sys; f0.bx = bar.b > 0 ? +(bar.x0 / sy.p).toFixed(2) : 0;
+        const f0 = P.items[first[0]], l0 = P.items[P.items.length - 1], g0 = P.v2[first[1]];
+        f0.bar = g0.bar = page.no + '.' + sy.sys; f0.bx = g0.bx = bar.b > 0 ? +(bar.x0 / sy.p).toFixed(2) : 0;
         if (bar.rs) f0.rs = true;
         if (bar.re) l0.re = true;
-        if (vol) for (let q = first; q < P.items.length; q++) P.items[q].v = vol.n;
+        if (vol) for (let q = first[0]; q < P.items.length; q++) P.items[q].v = vol.n;
         const sec = bi === 0 ? (st && st.sec) || (secSrc && secSrc.sec) : null;
         if (sec) f0.sec = { k: fifthsOverride != null ? fifthsOverride : sec.k, ts: sec.ts, sym: sec.sym || null, title: sec.title || null, by: sec.by || null, clef: st ? st.clefType || null : null };
       });
     });
   }
-  return { parts: parts.map(P => P.items), bars: nBars, bad: nBad };
+  return { parts: parts.map(P => ({ items: P.items, v2: P.two ? P.v2 : null })), bars: nBars, bad: nBad };
 }
 
 // Draws what was read on top of the page picture: ctx is scaled so that page pixels are used.
