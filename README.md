@@ -1,6 +1,17 @@
-# Goat Viols
+# Score Converter
 
-A web page for learning to read the C clef (alto clef) on the tenor viol da gamba, and for playing consort music on treble, tenor and bass viols. (It used to be called Tenor Viol Clef Trainer.)
+Upload printed sheet music (a PDF or a picture) and it becomes a score you can play back, change and export. It began as a viol trainer (Tenor Viol Clef Trainer, then Goat Viols) and keeps all of that: the viol necks, the drills and the consort player.
+
+What the reader takes from a page:
+
+- Single lines, consort scores, choir staves with two voices each, and voice or solo instrument with piano (the piano's two staves are found by their brace).
+- Chords, two voices on one staff (stems up and stems down), ties, dotted notes, rests, triplets, notes down to demisemiquavers, pickup bars, repeats and endings.
+- Key and time signatures (2/4, 3/4, 4/4, 6/8, 12/8, C and cut C among them), sharps, flats and naturals as printed.
+- Staccato, tenuto, accent and pause signs; dynamics (pp to ff); slurs.
+
+What it gives back: the score drawn again in the same layout of staves and voices, playback with a piano sound and loud and soft, and export as MIDI, MusicXML (for MuseScore, Sibelius, Dorico, Finale), PDF or its own .json.
+
+Not read yet: grace notes, trills and other ornaments, clef changes inside a line, beams that cross from one staff to the other, pedal marks, hairpins, lyrics. Old engraved editions and small or blurred scans read much worse than modern computer-set PDFs; bars that do not add up are shaded red on the page so you can check them.
 
 - The look: a medieval page of dark oak, parchment and gilding. Each neck is wood with its own grain and shade, with seven gut frets tied round it (as on a real viol), a bone nut and gut strings.
 - The score looks like the printed edition: a white page, Times lettering, each piece's title with the composer under it, C and cut C as printed, bar numbers at the start of each line, and (Notes > Lines as printed) the same lines as the PDF.

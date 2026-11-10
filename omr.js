@@ -886,7 +886,15 @@ function omrReadPage(imgData, again) {
         const ys = e.notes.map(h => h.y), topY = Math.min(...ys), botY = Math.max(...ys), cx = e.x;
         for (const sg of e.up === true ? [1] : e.up === false ? [-1] : [1, -1]) {
           const ya = sg > 0 ? botY + 0.6 * p : topY - 2.4 * p, yb = sg > 0 ? botY + 2.4 * p : topY - 0.6 * p;
-          for (const c of shapesIn(cx - 1.3 * p, ya, cx + 1.3 * p, yb)) {
+          const found = shapesIn(cx - 1.3 * p, ya, cx + 1.3 * p, yb);
+          // (an accent that crosses a staff line comes out in two or three pieces: put them together)
+          { const bits = found.filter(c => !c.touch && c.w <= 1.9 * p && c.h <= 1.25 * p && !(c.w <= 0.6 * p && c.h <= 0.6 * p && c.area / (c.w * c.h) >= 0.6) && Math.abs((c.minx + c.maxx) / 2 - cx) <= 0.9 * p);
+            if (bits.length >= 2 && bits.length <= 4) {
+              const u = { minx: Math.min(...bits.map(c => c.minx)), maxx: Math.max(...bits.map(c => c.maxx)), miny: Math.min(...bits.map(c => c.miny)), maxy: Math.max(...bits.map(c => c.maxy)), area: bits.reduce((a, c) => a + c.area, 0), pix: [].concat(...bits.map(c => c.pix)), bw: bits[0].bw, xa: bits[0].xa, ya: bits[0].ya, touch: false };
+              u.w = u.maxx - u.minx + 1; u.h = u.maxy - u.miny + 1;
+              if (u.w >= 0.9 * p && u.w <= 1.9 * p && u.h >= 0.45 * p && u.h <= 1.25 * p) { for (const c of bits) c.touch = true; found.push(u); }
+            } }
+          for (const c of found) {
             if (c.touch) continue;
             const mx = (c.minx + c.maxx) / 2, my = (c.miny + c.maxy) / 2, fill = c.area / (c.w * c.h);
             if (Math.abs(mx - cx) > 0.5 * p) continue;
@@ -902,9 +910,9 @@ function omrReadPage(imgData, again) {
             }
           }
         }
-        const up0 = Math.min(topY, st.top) - 0.5 * p;
-        const over = shapesIn(cx - 1.8 * p, up0 - 3.6 * p, cx + 1.8 * p, up0).filter(c => !c.touch);
-        const arcS = over.find(c => c.w >= 1.4 * p && c.w <= 2.9 * p && c.h >= 0.6 * p && c.h <= 1.7 * p && c.area / (c.w * c.h) <= 0.5 && Math.abs((c.minx + c.maxx) / 2 - cx) <= 0.6 * p);
+        const up0 = Math.min(topY - 0.6 * p, st.top + 0.3 * p);
+        const over = shapesIn(cx - 1.9 * p, up0 - 3.8 * p, cx + 1.9 * p, up0).filter(c => !c.touch);
+        const arcS = over.find(c => c.w >= 1.4 * p && c.w <= 2.9 * p && c.h >= 0.6 * p && c.h <= 1.7 * p && c.area / (c.w * c.h) <= 0.72 && Math.abs((c.minx + c.maxx) / 2 - cx) <= 0.6 * p);
         if (arcS && over.some(c => c !== arcS && c.w <= 0.6 * p && c.h <= 0.6 * p && c.w >= 0.15 * p && Math.abs((c.minx + c.maxx) / 2 - (arcS.minx + arcS.maxx) / 2) <= 0.4 * p && c.miny >= arcS.miny)) {
           e.art = e.art.filter(a => a !== 'st'); e.art.push('fe');
         }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Goat Viols</title>
+<title>Score Converter</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=UnifrakturMaguntia&display=swap">
@@ -141,7 +141,7 @@ span.pname{min-width:0;color:#6e4f28}
 </head>
 <body>
 <div id="topbar">
-  <span class="appname">❦ Goat Viols</span><span id="ver"></span>
+  <span class="appname">❦ Score Converter</span><span id="ver"></span>
   <button id="playBtn">▶ Play</button>
   <button id="followBtn" class="on" title="Go to the music that is playing and keep it in view (scrolling by hand pauses it)">Follow score</button>
   <label>From <select id="fromSel" style="max-width:220px"></select></label>
@@ -348,12 +348,12 @@ span.pname{min-width:0;color:#6e4f28}
 </div>
 
 <script src="vexflow.js"></script>
-<script src="omr.js?v=1.6"></script>
+<script src="omr.js?v=2.0"></script>
 <script>
 const {Renderer,Stave,StaveNote,Voice,Formatter,Accidental,Dot,Beam,StaveTie,Barline,Volta,GhostNote,StaveConnector,Tuplet,Fraction,Articulation,Curve,GraceNote,GraceNoteGroup,Glyph} = Vex.Flow;
 const $=id=>document.getElementById(id);
 const esc=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const APP_VERSION='3.4';
+const APP_VERSION='4.0';
 $('ver').textContent='v'+APP_VERSION;
 // iPads keep old copies of web pages for a while: if a newer version is online, load it (once per version)
 (async()=>{try{
@@ -2077,7 +2077,7 @@ async function loadFile(f){
   try{
     if(n.endsWith('.json')){
       const d=JSON.parse(await f.text());
-      if(d.app!=='tenor-viol-trainer')throw new Error('not a Goat Viols file');   // (the files still say tenor-viol-trainer inside, as before)
+      if(d.app!=='tenor-viol-trainer')throw new Error('not a Score Converter file');   // (the files still say tenor-viol-trainer inside, as before)
       let items;
       const okItem=i=>i&&typeof i.d==='number'&&(i.m==null||typeof i.m==='number');
       if(Array.isArray(d.parts)&&d.parts.length){   // a score with parts
