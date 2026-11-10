@@ -910,7 +910,7 @@ function decomp(t){const out=[];for(const r of REP){while(t>=r.t){out.push(r.t);
 // the pieces a note is drawn in (a triplet's note is one piece; nd is the length it is written as)
 const pieceDurs=(it,take)=>it.tu?[take]:decomp(Math.round(take));
 function pieceOf(it,d,idx){const q={m:it.m,d,idx};if(it.ch)q.ch=it.ch;if(it.tu){q.tu=it.tu;q.nd=Math.round(d*1.5);}if(it.hid)q.hid=true;if(it.up!=null)q.up=it.up;
-  if(it.art)q.art=it.art;if(it.dyn)q.dyn=it.dyn;if(it.gr)q.gr=it.gr;if(it.ss)q.ss=it.ss;if(it.se)q.se=it.se;return q;}
+  if(it.sp)q.sp=it.sp;if(it.art)q.art=it.art;if(it.dyn)q.dyn=it.dyn;if(it.gr)q.gr=it.gr;if(it.ss)q.ss=it.ss;if(it.se)q.se=it.se;return q;}
 // the second voice of a part, in the bars printed in the score (one group of pieces for each printed bar)
 function v2Bars(p){const out=[];let g=null;
   (p.v2||[]).forEach(it=>{if(it.bar!=null||!g){g=[];out.push(g);}const ps=pieceDurs(it,it.d).map(d=>pieceOf(it,d,-1));
@@ -1219,7 +1219,12 @@ function labelNotes(svg,notes,keys,stave){
 }
 // the notes of a chord for VexFlow, lowest first (ms: their pitches in the same order)
 function chordKeys(p,T,key,shift){const ms=[p.m].concat(p.ch||[]).sort((a,b)=>a-b);
-  return {ms,keys:ms.map(m=>{const sp=spell(m+T,key);return sp.letter.toLowerCase()+(sp.off>0?'#':sp.off<0?'b':'')+'/'+(sp.oct+shift);})};}
+  return {ms,keys:ms.map(m=>{const sp=spellAs(p,m,T,key);return sp.letter.toLowerCase()+(sp.off>0?'#':sp.off<0?'b':'')+'/'+(sp.oct+shift);})};}
+// A note's spelling: as it was printed in the score that was read (sp), else as the key suggests.
+function spellAs(p,m,T,key){
+  const o=!T&&p.sp?p.sp[m]:null;
+  if(o!=null){const n=m-o,L=LET.split('').find(l=>BASE[l]===((n%12)+12)%12);if(L)return {letter:L,off:o,oct:Math.floor(n/12)-1};}
+  return spell(m+T,key);}
 // A drawn note, chord or rest. o: {T, key, shift, vfClef, restKey, stem} (stem: 1 up, -1 down, 0 as the pitch asks).
 function mkNote(p,o){
   const rp=repOf(p.nd||p.d),dur=BASES[rp.bi][2]+'d'.repeat(rp.d);
@@ -1238,7 +1243,8 @@ function addArts(ps,notes){ps.forEach((p,i)=>{const sn=notes[i];if(!p.art||!sn||
 // dynamics under the staff (over it for a voice part, whose words go underneath)
 function drawMarks(ctx,svg,stave,pieces,notes,above){pieces.forEach((p,i)=>{const sn=notes[i];if(!p.dyn||!sn||sn.ghost||p.tiePrev)return;
   let x;try{x=sn.getAbsoluteX();}catch(e){return;}
-  try{omrDrawDyn(Vex.Flow,ctx,null,p.dyn,x-4,above?stave.getYForLine(0)-18:stave.getYForLine(4)+32,30);}catch(e){}});}
+  const rows=(showNames()?1:0)+(showSolfa()?1:0);
+  try{omrDrawDyn(Vex.Flow,ctx,null,p.dyn,x-4,above?stave.getYForLine(0)-18:stave.getYForLine(4)+(rows?26:34),rows?24:30);}catch(e){}});}
 const dynAbove=pt=>!pt.kb&&sc.parts.some(q=>q.kb);
 // triplets: three notes in a row that are marked as one
 function tupletsOf(ps,notes){const out=[];let g=[];
@@ -1246,6 +1252,11 @@ function tupletsOf(ps,notes){const out=[];let g=[];
   return out;}
 // beams in threes in 6/8, 9/8 and 12/8
 function beamOpt(ts,stem){const o={};if(stem)o.stem_direction=stem;if(ts&&ts[1]===8&&ts[0]%3===0)o.groups=[new Fraction(3,8)];return o;}
+// slurs: from the note that starts one to the note that ends it (when both are on the same line of music)
+function drawSlurs(list,sysCtx){let open=null;
+  list.forEach(a=>{if(a.sn.ghost)return;
+    if(a.p.se&&open&&open!==a&&!a.p.tieNext){if(open.si===a.si){try{new Curve(open.sn,a.sn,{}).setContext(sysCtx[a.si]).draw();}catch(e){}}open=null;}
+    if(a.p.ss&&!a.p.tiePrev)open=a;});}
 // ties from one drawn note to the next: every note of a note cut in pieces, or only the notes that carry on (tn)
 function drawTies(list,sysCtx){
   list.forEach((a,i)=>{
@@ -1349,7 +1360,7 @@ function drawScore(el){
     svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.style.width='100%';svg.style.height='auto';
   });
   // ties
-  drawTies(allNotes.filter(a=>!a.sn.ghost),sysCtx);drawTies(all2.filter(a=>!a.sn.ghost),sysCtx);
+  drawTies(allNotes.filter(a=>!a.sn.ghost),sysCtx);drawTies(all2.filter(a=>!a.sn.ghost),sysCtx);drawSlurs(allNotes,sysCtx);drawSlurs(all2,sysCtx);
   // click to select
   selEl=null;noteEls=new Map();
   allNotes.forEach(a=>{const e=a.sn.getSVGElement&&a.sn.getSVGElement();if(!e||a.p.idx>=nReal)return;
@@ -1493,7 +1504,7 @@ function drawFullScore(el){
   });
   markActivePart();
   // ties, part by part
-  all.forEach(list=>drawTies(list,sysCtx));allB.forEach(list=>drawTies(list,sysCtx));
+  all.forEach(list=>{drawTies(list,sysCtx);drawSlurs(list,sysCtx);});allB.forEach(list=>{drawTies(list,sysCtx);drawSlurs(list,sysCtx);});
   // click a note to select it; a note of another part makes that part the one you work on
   all.forEach((list,pi)=>list.forEach(a=>{const e=a.sn.getSVGElement&&a.sn.getSVGElement();if(!e)return;
     const m=noteElsAll[pi];if(!m.has(a.p.idx))m.set(a.p.idx,[]);m.get(a.p.idx).push(e);
@@ -2243,8 +2254,10 @@ function musicXml(){
           const tail=`<duration>${dur}</duration>`,post=`<voice>${vn}</voice><type>${type}</type>${'<dot/>'.repeat(rp.d)}${tm}`+(two?`<stem>${vn===1?'up':'down'}</stem>`:'');
           if(q.m==null){out+=`<note><rest/>${tail}${post}</note>\n`;tied[vn-1].clear();return;}
           const ms=[q.m].concat(q.ch||[]).sort((a,b)=>a-b),starts=new Set(q.tieNext?ms:(q.tn||[]).filter(m=>ms.includes(m))),stops=tied[vn-1];
-          ms.forEach((m,k)=>{const sp=spell(m,bar.key),tS=starts.has(m),tE=stops.has(m);
+          ms.forEach((m,k)=>{const sp=spellAs(q,m,0,bar.key),tS=starts.has(m),tE=stops.has(m);
             let no=(tE?'<tied type="stop"/>':'')+(tS?'<tied type="start"/>':'');
+            if(k===0&&q.ss&&!q.tiePrev)no+='<slur type="start"/>';
+            if(k===0&&q.se&&!q.tieNext)no+='<slur type="stop"/>';
             if(k===0&&q.art&&!q.tiePrev){const a=q.art.filter(x=>ARTX[x]).map(x=>`<${ARTX[x]}/>`).join('');if(a)no+=`<articulations>${a}</articulations>`;if(q.art.includes('fe'))no+='<fermata/>';}
             out+=`<note>${k?'<chord/>':''}<pitch><step>${sp.letter}</step>${sp.off?`<alter>${sp.off}</alter>`:''}<octave>${sp.oct}</octave></pitch>${tail}${tE?'<tie type="stop"/>':''}${tS?'<tie type="start"/>':''}${post}${no?`<notations>${no}</notations>`:''}</note>\n`;});
           tied[vn-1]=starts;});

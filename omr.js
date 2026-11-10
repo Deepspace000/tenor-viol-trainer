@@ -222,7 +222,17 @@ function analyzeBitmap(imgData, opts){
         let rl = 0, rr = 0; for (let k = 0; k < c.w; k++) { const v = longest(k); if (k <= c.w * 0.4 && v > rl) rl = v; if (k >= c.w * 0.6 && v > rr) rr = v; }
         // (the top of a flat is its stem alone, at the left; the top of a rest is broad and further right)
         let topAll = 0, topLeft = 0; for (const q of c.pix) { const cx = (q % W) - c.minx, cy = (q - (q % W)) / W - c.miny; if (cy <= 0.3 * c.h) { topAll++; if (cx <= 0.42 * c.w) topLeft++; } }
-        if (keyAccs.length >= 1 && (mx >= 0.72 * c.h ? 1 : -1) !== keyAccs[0].type && keyAccs.every(a => a.type === keyAccs[0].type) && rl < 0.8 * c.h) break; }   // (sharps and flats are not mixed: a rest after the sharps)   // (sharps and flats are not mixed)
+        if (keyAccs.length >= 1 && (mx >= 0.72 * c.h ? 1 : -1) !== keyAccs[0].type && keyAccs.every(a => a.type === keyAccs[0].type) && rl < 0.8 * c.h) break;   // (sharps and flats are not mixed: a rest after the sharps)
+        if (opts.thickLedger) {
+          // A note with its stem can look like a sharp or a flat. A sharp has two long strokes, a note one. A flat's
+          // round part is at its foot, a note with its stem down has its head at the top. And the signs of a key
+          // signature stand close together, the first note stands apart.
+          if (lastX >= 0 && c.minx - lastX > 0.8 * p) break;
+          if (mx >= 0.72 * c.h) { if (rl < 0.5 * c.h || rr < 0.5 * c.h) break; }
+          else { const rowW = new Map(); for (const q of c.pix) { const cy = (q - (q % W)) / W - c.miny; rowW.set(cy, (rowW.get(cy) || 0) + 1); }
+            let up = 0, dn = 0; for (const [cy, n] of rowW) { if (cy < 0.45 * c.h) up += n; else if (cy > 0.55 * c.h) dn += n; }
+            if (up > dn) break; }
+        } }   // (sharps and flats are not mixed)
       keyAccs.push({ minx: c.minx, maxx: c.maxx, miny: c.miny, maxy: c.maxy, type: mx >= 0.72 * c.h ? 1 : -1 });
       lastX = c.maxx;
     }
@@ -463,6 +473,7 @@ function analyzeBitmap(imgData, opts){
     const [a, c] = sides;
     if (a.dot || c.dot) return (a.dot || a.head || a.stem) && (c.dot || c.head || c.stem);
     if (a.head || c.head) return (a.head || a.stem) && (c.head || c.stem);
+    if (a.stem && c.stem && a.lo >= 0.68 * cols && c.hi <= 0.32 * cols) return true;       // two voices: stem up on the right, stem down on the left
     return a.stem && c.stem && Math.abs(a.lo - c.lo) <= 2 && Math.abs(a.hi - c.hi) <= 2;   // the same stroke above and below
   };
   // How much of a notehead-sized ellipse around (cx, cy) is black. Real noteheads fill it; rests,
@@ -528,14 +539,22 @@ function analyzeBitmap(imgData, opts){
       const sy = st.top + step * p / 2;
       // a beam is thick too, but it runs on sideways well past where a notehead would end
       const hrun = yy => { yy = Math.round(yy); const x0 = Math.round(hd.x); if (yy < 0 || yy >= H || !filled[yy*W + x0]) return 0; let l = x0, r = x0; while (l > 0 && filled[yy*W + l - 1]) l--; while (r < W - 1 && filled[yy*W + r + 1]) r++; return r - l + 1; };
-      if (Math.max(hrun(hd.y - 0.3 * p), hrun(hd.y + 0.3 * p)) > 2.0 * p) { R(b, 'beam'); continue; }
+      if (Math.max(hrun(hd.y - 0.3 * p), hrun(hd.y + 0.3 * p)) > 2.0 * p) {
+        let thin = false;
+        if (opts.thickLedger) {   // (how thick is whatever runs on sideways, a little way from the head?)
+          const tk = xx => { xx = Math.round(xx); let best = 0; for (const yy of [Math.round(hd.y - 0.3 * p), Math.round(hd.y + 0.3 * p)]) { if (xx < 0 || xx >= W || !filled[yy * W + xx]) continue; let a2 = yy, b2 = yy; while (a2 > 0 && filled[(a2 - 1) * W + xx]) a2--; while (b2 < H - 1 && filled[(b2 + 1) * W + xx]) b2++; best = Math.max(best, b2 - a2 + 1); } return best; };
+          const l = tk(hd.x - 1.25 * p), r2 = tk(hd.x + 1.25 * p); thin = Math.max(l, r2) > 0 && Math.max(l, r2) < 0.3 * p;
+        }
+        if (!thin) { R(b, 'beam'); continue; }
+      }
       // ...and a short beam is thinner, top to bottom, than a notehead
       const vx = Math.round(hd.x); let va = Math.round(hd.y), vb = va;
       if (filled[va*W + vx]) { while (va > 0 && filled[(va - 1)*W + vx]) va--; while (vb < H - 1 && filled[(vb + 1)*W + vx]) vb++; }
       if (vb - va + 1 < 0.66 * p) { R(b, 'thin'); continue; }
       { const bx0 = b.minx + 1, bx1 = b.maxx - 1, by0 = b.miny + 1, by1 = b.maxy - 1;
         const corners = [[bx0, by0], [bx1, by0], [bx0, by1], [bx1, by1]].filter(([cx, cy]) => filled[cy * W + cx]).length;
-        if (corners >= 3 && b.maxy - b.miny + 1 <= 0.8 * p) { R(b, 'block'); continue; } }
+        let hollowIn = 0; if (opts.thickLedger && corners >= 3) for (let yy = b.miny; yy <= b.maxy; yy++) for (let xx = b.minx; xx <= b.maxx; xx++) if (holes[yy * W + xx]) hollowIn++;
+        if (corners >= 3 && b.maxy - b.miny + 1 <= 0.8 * p && hollowIn < 0.04 * w * h) { R(b, 'block'); continue; } }
       const ef = ellipseFill(hd.x, hd.y, p);
       if (ef < 0.82) { R(b, 'fill', { ef: +ef.toFixed(2), step }); continue; }      // not a solid oval: rest, accidental, text
       if (opts.ledger && (step <= -2 || step >= 10)) {
@@ -591,7 +610,7 @@ function omrReadPage(imgData, again) {
   // a dot is small and round: nothing dark straight above, below or beside it (a short upright mark fails)
   const hasDot = (x, y, p) => { for (let dx = 0.8; dx <= 1.75; dx += 0.1) { const cx = x + dx * p, r = 0.34 * p; if (discFill(cx, y, 0.16 * p) >= 0.8 && ringFill(cx, y, 0.3 * p, 0.46 * p) <= 0.22 && !dark(Math.round(cx), Math.round(y - r)) && !dark(Math.round(cx), Math.round(y + r)) && !dark(Math.round(cx - r), Math.round(y)) && !dark(Math.round(cx + r), Math.round(y))) return true; } return false; };
   const runLen = (x, y0, dir, max) => { let len = 0, last = 0, gap = 0, y = y0; while (len < max) { y += dir; len++; if (y < 0 || y >= H) break; if (filled[y * W + x]) { last = len; gap = 0; } else if (++gap > Math.max(2, LT)) break; } return last; };
-  const bandCount = (x, ya, yb, p, sx) => { const a = Math.round(Math.min(ya, yb)), b = Math.round(Math.max(ya, yb)), xi = Math.round(x); let runs = 0, run = 0; const lo = Math.max(2, 0.16 * p), hi = 0.9 * p;
+  const bandCount = (x, ya, yb, p, sx, thickOnly) => { const a = Math.round(Math.min(ya, yb)), b = Math.round(Math.max(ya, yb)), xi = Math.round(x); let runs = 0, run = 0; const lo = thickOnly ? 0.3 * p : Math.max(2, 0.16 * p), hi = 0.9 * p;
     // (sx: the stem's place. Then a band only counts if it runs unbroken from there to x.)
     const joined = ym => { if (sx == null) return true; let gap = 0; for (let xx = Math.min(xi, Math.round(sx)); xx <= Math.max(xi, Math.round(sx)); xx++) { if (xx >= 0 && xx < W && clean[ym * W + xx]) gap = 0; else if (++gap > 2) return false; } return true; };
     const anyJoined = (y0, y1) => { for (let y = y0; y <= y1; y += 2) if (joined(y)) return true; return joined(y1); };   // (a flag leaves the stem as it curls down)
@@ -819,7 +838,7 @@ function omrReadPage(imgData, again) {
         let bands = 0;
         if (has && !hollow && !breve) {
           const o = s.dir < 0 ? hs[0] : hs[hs.length - 1], tip = o.n.y + s.dir * s.len, to = tip - s.dir * Math.min(2.5 * p, Math.max(1.7 * p, s.len - 1.0 * p));
-          const beam = [1, -1].map(sg => Math.max(med3([0.35, 0.55, 0.75].map(dx => bandCount(s.x + sg * dx * p, tip, to, p, s.x))), med3([0.9, 1.25, 1.6].map(dx => bandCount(s.x + sg * dx * p, tip, to, p, s.x)))));
+          const beam = [1, -1].map(sg => Math.max(med3([0.35, 0.55, 0.75].map(dx => bandCount(s.x + sg * dx * p, tip, to, p, s.x, sg < 0))), med3([0.9, 1.25, 1.6].map(dx => bandCount(s.x + sg * dx * p, tip, to, p, s.x, true)))));
           const flag = med3([0.4, 0.6, 0.8].map(dx => bandCount(s.x + dx * p, tip, to, p, s.x)));
           bands = Math.max(beam[0], beam[1], flag);
         }
@@ -1059,6 +1078,37 @@ function omrReadPage(imgData, again) {
   // the staves of one system share the endings drawn over its top staff, and its time signature
   const bySys = {};
   out.staves.forEach(s => (bySys[s.sys] = bySys[s.sys] || []).push(s));
+  // ---- slurs: a long thin arc that starts at one note and ends at another. (An arc between two notes of the same
+  //      height is a tie.) Found as shapes that are one thin stroke in nearly every column and bend up or down.
+  for (const k in bySys) {
+    const grp = bySys[k], p = grp[0].p; if (!grp.some(s => s.pe && s.pe.length)) continue;
+    const ya = Math.max(0, Math.round(grp[0].top - 4.5 * p)), yb = Math.min(H - 1, Math.round(grp[grp.length - 1].bot + 4.5 * p));
+    const xa = Math.max(0, Math.round(Math.min(...grp.map(s => s.musicStart)) - p)), xb = Math.min(W - 1, Math.round(Math.max(...grp.map(s => s.right))));
+    const bw = xb - xa + 1, bh = yb - ya + 1; if (bw < 10 || bh < 10) continue;
+    const seen = new Uint8Array(bw * bh), stk = [], cap = Math.round(60 * p * 0.6 * p);
+    const heads = []; grp.forEach(s => s.pe.forEach(e => { if (e.kind === 'note') e.notes.forEach(h => heads.push({ e, h, s })); }));
+    const nearHead = (x, y) => { let best = null, bd = 1e9; for (const q of heads) { const dx = Math.abs(q.h.x - x), dy = Math.abs(q.h.y - y); if (dx > 1.4 * p || dy > 3.4 * p) continue; const d = dx + 0.5 * dy; if (d < bd) { bd = d; best = q; } } return best; };
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+      if (seen[y * bw + x] || !clean[(y + ya) * W + x + xa]) continue;
+      let minx = x, maxx = x, miny = y, maxy = y, area = 0; const pix = []; stk.length = 0; stk.push(y * bw + x); seen[y * bw + x] = 1;
+      while (stk.length) { const q = stk.pop(), px = q % bw, py = (q - px) / bw; area++; if (area <= cap) pix.push(q);
+        if (px < minx) minx = px; if (px > maxx) maxx = px; if (py < miny) miny = py; if (py > maxy) maxy = py;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nx = px + dx, ny = py + dy; if (nx < 0 || ny < 0 || nx >= bw || ny >= bh) continue; const j = ny * bw + nx; if (!seen[j] && clean[(ny + ya) * W + nx + xa]) { seen[j] = 1; stk.push(j); } } }
+      const w = maxx - minx + 1, h = maxy - miny + 1;
+      if (area > cap || w < 2.2 * p || h < 0.3 * p || h > 0.5 * w + p || area > w * 0.55 * p) continue;
+      const lo = new Int32Array(w).fill(1e9), hi = new Int32Array(w).fill(-1), cnt = new Uint16Array(w);
+      for (const q of pix) { const px = q % bw - minx, py = (q - q % bw) / bw; cnt[px]++; if (py < lo[px]) lo[px] = py; if (py > hi[px]) hi[px] = py; }
+      let single = 0, thick = 0; for (let c = 0; c < w; c++) { if (cnt[c] && hi[c] - lo[c] + 1 <= cnt[c] + 1) single++; if (cnt[c] > thick) thick = cnt[c]; }
+      if (single < 0.9 * w || thick > 0.55 * p) continue;
+      const mid = c => (lo[c] + hi[c]) / 2, cL = Math.min(w - 1, 2), cR = Math.max(0, w - 3), cM = w >> 1;
+      const bend = mid(cM) - (mid(cL) + mid(cR)) / 2;
+      if (Math.abs(bend) < 0.25 * p) continue;                                  // (a straight line is not a slur)
+      const a = nearHead(minx + xa, mid(cL) + ya), b = nearHead(maxx + xa, mid(cR) + ya);
+      if (!a || !b || a.e === b.e || b.h.x <= a.h.x) continue;
+      if (a.s === b.s && a.h.step === b.h.step) { a.h.tie = true; continue; }    // the same note twice: a tie
+      a.e.ss = 1; b.e.se = 1;
+    }
+  }
   // A piano part: two staves held by a brace, or the only two staves of a larger system whose bar lines run from one
   // into the other. A system with a piano part, or with chords or two voices on a staff, is read with every head.
   {
@@ -1376,6 +1426,7 @@ function omrPolyPlan(pages) {
       s.part = k; last = k;
     });
     g.forEach(s => { if (s.kb) s.part = ref.length + (s.kb === 'U' ? 0 : 1); });
+    if (hasKb && !g.some(s => s.kb)) v.forEach(s => { if (ref[s.part] !== s.clefType && s.clefType === 'bass' && !ref.includes('bass')) s.part = ref.length + 1; });
   });
   const plan = ref.map(c => ({ kb: null, clef: c }));
   if (hasKb) plan.push({ kb: 'U', clef: 'treble' }, { kb: 'L', clef: 'bass' });
@@ -1506,15 +1557,16 @@ function omrPolyItems(pages, plan, clef, fifthsOverride, barT) {
           const keyOff = omrKeyOff(fifthsOverride != null ? fifthsOverride : st.keyFinal != null ? st.keyFinal : st.fifths);
           for (const e of evs) {
             if (e.kind !== 'note') continue;
-            e.ms = []; e.tnm = [];
+            e.ms = []; e.tnm = []; e.sp = {};
             for (const h of e.notes) {
               const dia = topDia - h.step, letter = OMR_LET[((dia % 7) + 7) % 7], oct = Math.floor(dia / 7);
               let off = keyOff[letter];
               if (h.accOff != null) { off = h.accOff; carry[dia] = off; } else if (carry[dia] != null) off = carry[dia];
               let m = 12 * (oct + 1) + OMR_BASE[letter] + off;
-              if (e.t === 0 && h.accOff == null && P.tied[dia] != null) m = P.tied[dia];   // tied over the bar line: still the same note
+              if (e.t === 0 && h.accOff == null && P.tied[dia] != null) { m = P.tied[dia][0]; off = P.tied[dia][1]; }   // tied over the bar line: still the same note
               if (!e.ms.includes(m)) e.ms.push(m);
-              if (h.tie) { e.tnm.push(m); if (R12(e.t + e.pd) >= L - 0.01) tiedOut[dia] = m; }
+              if (off) e.sp[m] = off;   // how the note is spelt on the page (a flat stays a flat)
+              if (h.tie) { e.tnm.push(m); if (R12(e.t + e.pd) >= L - 0.01) tiedOut[dia] = [m, off]; }
             }
           }
           P.tied = tiedOut;
@@ -1529,7 +1581,7 @@ function omrPolyItems(pages, plan, clef, fifthsOverride, barT) {
           if (V[w].some(o => over(o, e))) {
             if (e.kind !== 'note') continue;
             const same = V[0].concat(V[1]).find(o => o.kind === 'note' && Math.abs(o.t - e.t) < 0.01);   // no room in either voice: part of the chord that starts with it
-            if (same) { e.ms.forEach(m => { if (!same.ms.includes(m)) same.ms.push(m); }); e.tnm.forEach(m => { if (!same.tnm.includes(m)) same.tnm.push(m); }); }
+            if (same) { e.ms.forEach(m => { if (!same.ms.includes(m)) same.ms.push(m); }); e.tnm.forEach(m => { if (!same.tnm.includes(m)) same.tnm.push(m); }); Object.assign(same.sp, e.sp); }
             continue;
           }
           V[w].push(e);
@@ -1548,6 +1600,7 @@ function omrPolyItems(pages, plan, clef, fifthsOverride, barT) {
               if (ms.length > 1) it.ch = ms.slice(1);
               if (e.tnm.length) it.tn = e.tnm.slice();
               if (e.tu) it.tu = e.tu;
+              if (Object.keys(e.sp).length) it.sp = e.sp;
               if (e.up != null && two) it.up = e.up;
               if (e.art && e.art.length) it.art = e.art.slice();
               if (e.dyn) it.dyn = e.dyn;
